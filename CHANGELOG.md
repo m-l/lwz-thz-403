@@ -8,6 +8,22 @@ All notable changes to the THZ integration are documented here.
 
 ### New Features
 
+- **Entity visibility tiers** (`entity_visibility` config option, choosable
+  during initial setup and later via Reconfigure): replaces the previous
+  all-or-nothing behavior of hiding every HC2, schedule/program, and advanced
+  technical parameter entity behind a manual per-entity enable click. Three
+  tiers are offered: "Default" hides HC2, program/schedule entities, and
+  advanced parameters (gradients, hysteresis, booster timing, and similar) —
+  matching the integration's previous fixed behavior. "Extended" enables
+  everything except the lengthy program/schedule entries, so HC2 and the
+  advanced parameters show up without any manual clicking. "All" enables
+  literally everything, schedules included. Changing this option later via
+  Reconfigure is retroactive: it bulk enables/disables the relevant entities
+  on your existing install (not just newly created ones going forward),
+  so switching tiers doesn't require re-adding the integration. It never
+  touches an entity you've manually enabled or disabled yourself — only
+  entities this option itself previously disabled are ever re-enabled.
+
 - **FHEM/technical entity_id naming style** (`entity_id_style` config option,
   choosable during initial setup and later via Reconfigure): adds an
   alternative to this integration's own descriptive entity_id naming.

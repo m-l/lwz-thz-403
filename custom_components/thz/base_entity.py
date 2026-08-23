@@ -18,7 +18,8 @@ from .const import (
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     ENTITY_ID_STYLE_DEFAULT,
-    should_hide_entity_by_default,
+    ENTITY_VISIBILITY_DEFAULT,
+    should_hide_entity,
 )
 from .entity_id_style import resolve_suggested_object_id
 
@@ -48,6 +49,7 @@ class THZBaseEntity(Entity):
         scan_interval: int | None = None,
         translation_key: str | None = None,
         entity_id_style: str = ENTITY_ID_STYLE_DEFAULT,
+        entity_visibility: str = ENTITY_VISIBILITY_DEFAULT,
     ) -> None:
         """Initialize base THZ entity.
 
@@ -66,6 +68,9 @@ class THZBaseEntity(Entity):
                 raw ``name`` so a brand-new entity's entity_id reads like the
                 FHEM/Stiebel field name; the displayed name and unique_id are
                 unaffected either way. See entity_id_style.py.
+            entity_visibility: One of the ``ENTITY_VISIBILITY_*`` values from
+                const.py, controlling whether this entity starts out enabled
+                or disabled in the entity registry. See should_hide_entity().
         """
         self._command = command
         self._device = device
@@ -115,19 +120,21 @@ class THZBaseEntity(Entity):
         self._update_interval = timedelta(seconds=interval)
         self._unsub_update: Callable[[], None] | None = None
 
-        # Set default visibility based on entity naming conventions
+        # Set default visibility based on entity naming conventions and the
+        # configured entity_visibility tier.
         # Uses HA's standard _attr_ pattern – do NOT add an explicit @property
         # override; it conflicts with HA's __init_subclass__ CachedProperty
         # mechanism and can silently default to True on derived entity classes.
-        self._attr_entity_registry_enabled_default = not should_hide_entity_by_default(
-            name
+        self._attr_entity_registry_enabled_default = not should_hide_entity(
+            name, entity_visibility
         )
 
         _LOGGER.debug(
-            "Entity %s: entity_registry_enabled_default=%s (hide=%s)",
+            "Entity %s: entity_registry_enabled_default=%s (hide=%s, visibility=%s)",
             name,
             self._attr_entity_registry_enabled_default,
-            should_hide_entity_by_default(name),
+            should_hide_entity(name, entity_visibility),
+            entity_visibility,
         )
 
     def _generate_unique_id(self, command: str, name: str) -> str:

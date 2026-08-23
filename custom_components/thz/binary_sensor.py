@@ -24,7 +24,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, ENTITY_ID_STYLE_DEFAULT, should_hide_entity_by_default
+from .const import (
+    DOMAIN,
+    ENTITY_ID_STYLE_DEFAULT,
+    ENTITY_VISIBILITY_DEFAULT,
+    should_hide_entity,
+)
 from .entity_id_style import resolve_suggested_object_id
 from .register_maps.register_map_manager import RegisterMapManager
 from .value_codec import decode_raw_value
@@ -89,6 +94,7 @@ async def async_setup_entry(
     coordinators = entry_data["coordinators"]
     device_id = entry_data["device_id"]
     entity_id_style = entry_data.get("entity_id_style", ENTITY_ID_STYLE_DEFAULT)
+    entity_visibility = entry_data.get("entity_visibility", ENTITY_VISIBILITY_DEFAULT)
 
     entities: list[THZBinarySensor] = []
     seen_sensor_names: set[str] = set()
@@ -153,6 +159,7 @@ async def async_setup_entry(
                     block=block_bytes,
                     device_id=device_id,
                     entity_id_style=entity_id_style,
+                    entity_visibility=entity_visibility,
                 )
             )
 
@@ -182,6 +189,7 @@ class THZBinarySensor(CoordinatorEntity, BinarySensorEntity):
         block: bytes,
         device_id: str,
         entity_id_style: str = ENTITY_ID_STYLE_DEFAULT,
+        entity_visibility: str = ENTITY_VISIBILITY_DEFAULT,
     ) -> None:
         """Initialize a THZBinarySensor.
 
@@ -192,6 +200,8 @@ class THZBinarySensor(CoordinatorEntity, BinarySensorEntity):
             block: Block address bytes (hex) identifying the register.
             device_id: Device identifier for linking this entity to the device.
             entity_id_style: "default" or "fhem" (see entity_id_style.py).
+            entity_visibility: "default"/"extended"/"all" (see const.py's
+                should_hide_entity()).
         """
         super().__init__(coordinator)
 
@@ -215,9 +225,9 @@ class THZBinarySensor(CoordinatorEntity, BinarySensorEntity):
         # Device class improves UI representation and enables automations
         self._attr_device_class = _get_device_class(self._entity_name)
 
-        # Visibility: hide advanced/technical entities by default
+        # Visibility: hide advanced/technical entities per the configured tier
         self._attr_entity_registry_enabled_default = (
-            not should_hide_entity_by_default(self._entity_name)
+            not should_hide_entity(self._entity_name, entity_visibility)
         )
 
         # Entity-ID naming style: independent of translation_key/unique_id.

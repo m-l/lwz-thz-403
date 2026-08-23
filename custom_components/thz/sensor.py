@@ -30,7 +30,12 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, ENTITY_ID_STYLE_DEFAULT, should_hide_entity_by_default
+from .const import (
+    DOMAIN,
+    ENTITY_ID_STYLE_DEFAULT,
+    ENTITY_VISIBILITY_DEFAULT,
+    should_hide_entity,
+)
 from .cop_sensor import async_setup_cop_sensors
 from .entity_id_style import resolve_suggested_object_id
 from .register_maps.register_map_manager import RegisterMapManager
@@ -65,6 +70,7 @@ async def async_setup_entry(
     device_id = entry_data["device_id"]
     unsupported_blocks: set[str] = entry_data.get("unsupported_blocks", set())
     entity_id_style = entry_data.get("entity_id_style", ENTITY_ID_STYLE_DEFAULT)
+    entity_visibility = entry_data.get("entity_visibility", ENTITY_VISIBILITY_DEFAULT)
 
     # Create sensors
     sensors = []
@@ -150,6 +156,7 @@ async def async_setup_entry(
                     block=block_bytes,
                     device_id=device_id,
                     entity_id_style=entity_id_style,
+                    entity_visibility=entity_visibility,
                 )
             )
     async_add_entities(sensors, True)
@@ -257,7 +264,13 @@ class THZGenericSensor(CoordinatorEntity, SensorEntity):
     """
 
     def __init__(
-        self, coordinator, entry, block, device_id, entity_id_style=ENTITY_ID_STYLE_DEFAULT
+        self,
+        coordinator,
+        entry,
+        block,
+        device_id,
+        entity_id_style=ENTITY_ID_STYLE_DEFAULT,
+        entity_visibility=ENTITY_VISIBILITY_DEFAULT,
     ) -> None:
         """Initialize a sensor instance with the provided configuration.
 
@@ -267,6 +280,8 @@ class THZGenericSensor(CoordinatorEntity, SensorEntity):
             block: The block associated with the sensor.
             device_id: The unique device identifier.
             entity_id_style: "default" or "fhem" (see entity_id_style.py).
+            entity_visibility: "default"/"extended"/"all" (see const.py's
+                should_hide_entity()).
 
         Note:
             When translation_key is available, only _attr_translation_key is set.
@@ -305,7 +320,7 @@ class THZGenericSensor(CoordinatorEntity, SensorEntity):
         # See base_entity.py for rationale on avoiding @property overrides
         # for entity_registry_enabled_default.
         self._attr_entity_registry_enabled_default = (
-            not should_hide_entity_by_default(self._entity_name)
+            not should_hide_entity(self._entity_name, entity_visibility)
         )
 
         # Entity-ID naming style: independent of translation_key/unique_id.

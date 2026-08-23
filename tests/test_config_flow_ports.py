@@ -450,3 +450,168 @@ class TestEntityIdStyleOption:
         assert matching_calls[-1].kwargs.get("default") == "fhem"
 
 
+class TestEntityVisibilityOption:
+    """Tests for the entity_visibility config-flow option (default/extended/all)."""
+
+    def test_init_defaults_to_default_visibility(self):
+        from custom_components.thz.const import ENTITY_VISIBILITY_DEFAULT
+
+        flow = THZConfigFlow()
+        assert flow.entity_visibility == ENTITY_VISIBILITY_DEFAULT
+
+    def test_async_step_user_schema_includes_entity_visibility(self):
+        """The very first setup step's schema offers the entity_visibility field.
+
+        See the note on TestEntityIdStyleOption's schema test for why this
+        inspects the mocked vol.Optional constructor's call args rather than
+        the (also mocked) resulting vol.Schema object.
+        """
+        import asyncio
+        import voluptuous as vol
+        from custom_components.thz.const import CONF_ENTITY_VISIBILITY
+
+        vol.Optional.reset_mock()
+        flow = THZConfigFlow()
+        flow.async_show_form = MagicMock(side_effect=lambda **kw: kw)
+        asyncio.run(flow.async_step_user(None))
+
+        assert any(
+            call.args and call.args[0] == CONF_ENTITY_VISIBILITY
+            for call in vol.Optional.call_args_list
+        )
+
+    def test_async_step_user_captures_entity_visibility_and_routes_to_usb(self):
+        import asyncio
+        from custom_components.thz.const import CONNECTION_USB
+
+        flow = THZConfigFlow()
+
+        async def fake_setup_usb():
+            return "usb_step"
+
+        flow.async_step_setup_usb = fake_setup_usb
+
+        result = asyncio.run(
+            flow.async_step_user(
+                {"connection_type": CONNECTION_USB, "entity_visibility": "extended"}
+            )
+        )
+        assert flow.entity_visibility == "extended"
+        assert result == "usb_step"
+
+    def test_async_step_user_defaults_entity_visibility_when_omitted(self):
+        """If the form is somehow submitted without the field, fall back safely."""
+        import asyncio
+        from custom_components.thz.const import (
+            CONNECTION_USB,
+            ENTITY_VISIBILITY_DEFAULT,
+        )
+
+        flow = THZConfigFlow()
+
+        async def fake_setup_usb():
+            return "usb_step"
+
+        flow.async_step_setup_usb = fake_setup_usb
+
+        asyncio.run(flow.async_step_user({"connection_type": CONNECTION_USB}))
+        assert flow.entity_visibility == ENTITY_VISIBILITY_DEFAULT
+
+    def test_reconfigure_schema_includes_entity_visibility(self):
+        """reconfigure_schema() exposes the same option for later changes.
+
+        This is the field that lets the user retroactively apply a different
+        visibility tier to an existing install (see
+        _async_apply_entity_visibility_tier in __init__.py).
+        """
+        import asyncio
+        import voluptuous as vol
+        from custom_components.thz.const import (
+            CONF_CONNECTION_TYPE,
+            CONF_ENTITY_VISIBILITY,
+            CONNECTION_IP,
+        )
+
+        flow = THZConfigFlow()
+        flow.hass = MagicMock()
+
+        fake_area_registry = MagicMock()
+        fake_area_registry.async_list_areas.return_value = []
+
+        vol.Optional.reset_mock()
+        with patch(
+            "custom_components.thz.config_flow.ar.async_get",
+            return_value=fake_area_registry,
+        ):
+            asyncio.run(flow.reconfigure_schema({CONF_CONNECTION_TYPE: CONNECTION_IP}))
+
+        assert any(
+            call.args and call.args[0] == CONF_ENTITY_VISIBILITY
+            for call in vol.Optional.call_args_list
+        )
+
+    def test_reconfigure_schema_preserves_existing_entity_visibility_default(self):
+        """A stored 'all' choice is prefilled as the form's default, not reset."""
+        import asyncio
+        import voluptuous as vol
+        from custom_components.thz.const import (
+            CONF_CONNECTION_TYPE,
+            CONF_ENTITY_VISIBILITY,
+            CONNECTION_IP,
+        )
+
+        flow = THZConfigFlow()
+        flow.hass = MagicMock()
+
+        fake_area_registry = MagicMock()
+        fake_area_registry.async_list_areas.return_value = []
+
+        vol.Optional.reset_mock()
+        with patch(
+            "custom_components.thz.config_flow.ar.async_get",
+            return_value=fake_area_registry,
+        ):
+            asyncio.run(
+                flow.reconfigure_schema(
+                    {CONF_CONNECTION_TYPE: CONNECTION_IP, CONF_ENTITY_VISIBILITY: "all"}
+                )
+            )
+
+        matching_calls = [
+            call
+            for call in vol.Optional.call_args_list
+            if call.args and call.args[0] == CONF_ENTITY_VISIBILITY
+        ]
+        assert matching_calls, "vol.Optional was never called for entity_visibility"
+        assert matching_calls[-1].kwargs.get("default") == "all"
+
+    def test_refresh_blocks_final_data_includes_entity_visibility(self):
+        """The final config-entry data dict carries the chosen visibility tier."""
+        import asyncio
+        from custom_components.thz.const import (
+            CONF_ENTITY_VISIBILITY,
+            DEFAULT_UPDATE_INTERVAL,
+        )
+
+        flow = THZConfigFlow()
+        flow.connection_data = {"connection_type": "ip", "host": "1.2.3.4"}
+        flow.blocks = []
+        flow.entity_visibility = "extended"
+
+        captured = {}
+
+        def fake_create_entry(title, data):
+            captured["data"] = data
+            return {"title": title, "data": data}
+
+        flow.async_create_entry = fake_create_entry
+
+        asyncio.run(
+            flow.async_step_refresh_blocks(
+                {"write_interval": DEFAULT_UPDATE_INTERVAL}
+            )
+        )
+
+        assert captured["data"][CONF_ENTITY_VISIBILITY] == "extended"
+
+

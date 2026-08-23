@@ -17,6 +17,7 @@ from homeassistant.helpers import area_registry as ar
 from .const import (
     CONF_CONNECTION_TYPE,
     CONF_ENTITY_ID_STYLE,
+    CONF_ENTITY_VISIBILITY,
     CONF_FIRMWARE_OVERRIDE,
     CONNECTION_IP,
     CONNECTION_USB,
@@ -27,6 +28,8 @@ from .const import (
     DOMAIN,
     ENTITY_ID_STYLE_DEFAULT,
     ENTITY_ID_STYLE_LABELS,
+    ENTITY_VISIBILITY_DEFAULT,
+    ENTITY_VISIBILITY_LABELS,
     FIRMWARE_OVERRIDE_AUTO,
     FIRMWARE_PROFILE_LABELS,
 )
@@ -52,12 +55,16 @@ class THZConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.connection_data = {}
         self.blocks = []
         self.entity_id_style = ENTITY_ID_STYLE_DEFAULT
+        self.entity_visibility = ENTITY_VISIBILITY_DEFAULT
 
     async def async_step_user(self, user_input=None) -> config_entries.ConfigFlowResult:
         """First step, select connection type and entity naming style."""
         if user_input is not None:
             self.entity_id_style = user_input.get(
                 CONF_ENTITY_ID_STYLE, ENTITY_ID_STYLE_DEFAULT
+            )
+            self.entity_visibility = user_input.get(
+                CONF_ENTITY_VISIBILITY, ENTITY_VISIBILITY_DEFAULT
             )
             if user_input["connection_type"] == CONNECTION_IP:
                 return await self.async_step_setup_ip()
@@ -78,6 +85,15 @@ class THZConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_ENTITY_ID_STYLE, default=ENTITY_ID_STYLE_DEFAULT
                 ): vol.In(ENTITY_ID_STYLE_LABELS),
+                # Entity visibility tier: which less-common entities (HC2,
+                # schedules, advanced technical parameters) start enabled.
+                # "default" hides all of them (matching prior behavior),
+                # "extended" enables everything except schedules, "all"
+                # enables everything. Can be changed later via Reconfigure,
+                # which retroactively bulk enables/disables existing entities.
+                vol.Optional(
+                    CONF_ENTITY_VISIBILITY, default=ENTITY_VISIBILITY_DEFAULT
+                ): vol.In(ENTITY_VISIBILITY_LABELS),
             }
         )
         return self.async_show_form(step_id="user", data_schema=schema)
@@ -282,6 +298,15 @@ class THZConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_ENTITY_ID_STYLE,
             default=defaults.get(CONF_ENTITY_ID_STYLE, ENTITY_ID_STYLE_DEFAULT),
         )] = vol.In(ENTITY_ID_STYLE_LABELS)
+
+        # Entity visibility tier: unlike entity_id_style, changing this HERE
+        # retroactively bulk enables/disables entities already in the
+        # registry (see _async_apply_entity_visibility_tier in __init__.py),
+        # not just newly-created ones.
+        schema_dict[vol.Optional(
+            CONF_ENTITY_VISIBILITY,
+            default=defaults.get(CONF_ENTITY_VISIBILITY, ENTITY_VISIBILITY_DEFAULT),
+        )] = vol.In(ENTITY_VISIBILITY_LABELS)
 
         # Refresh intervals for each block
         refresh_intervals = defaults.get("refresh_intervals", {})
@@ -526,6 +551,9 @@ class THZConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_FIRMWARE_OVERRIDE: firmware_override,
                 CONF_ENTITY_ID_STYLE: getattr(
                     self, "entity_id_style", ENTITY_ID_STYLE_DEFAULT
+                ),
+                CONF_ENTITY_VISIBILITY: getattr(
+                    self, "entity_visibility", ENTITY_VISIBILITY_DEFAULT
                 ),
             }
             conn_target = data.get("host") or data.get("device")

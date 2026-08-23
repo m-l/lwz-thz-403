@@ -130,7 +130,13 @@ def quarters_to_time(num: int) -> time | None:
 
 
 def _create_time_entities(
-    name, entry, device, device_id, write_interval, entity_id_style="default"
+    name,
+    entry,
+    device,
+    device_id,
+    write_interval,
+    entity_id_style="default",
+    entity_visibility="default",
 ):
     """Factory function to create time entities, handling schedule types specially."""
     if entry["type"] == "schedule":
@@ -146,6 +152,7 @@ def _create_time_entities(
                 time_type="start",
                 scan_interval=write_interval,
                 entity_id_style=entity_id_style,
+                entity_visibility=entity_visibility,
             ),
             THZScheduleTime(
                 name=f"{name} End",
@@ -156,6 +163,7 @@ def _create_time_entities(
                 time_type="end",
                 scan_interval=write_interval,
                 entity_id_style=entity_id_style,
+                entity_visibility=entity_visibility,
             ),
         ]
     else:
@@ -167,6 +175,7 @@ def _create_time_entities(
             device_id=device_id,
             scan_interval=write_interval,
             entity_id_style=entity_id_style,
+            entity_visibility=entity_visibility,
         )
 
 
@@ -182,6 +191,7 @@ async def async_setup_entry(
     device: THZDevice = entry_data["device"]
     device_id = entry_data["device_id"]
     entity_id_style = entry_data.get("entity_id_style", "default")
+    entity_visibility = entry_data.get("entity_visibility", "default")
 
     from .const import DEFAULT_UPDATE_INTERVAL
     write_interval = config_entry.data.get("write_interval", DEFAULT_UPDATE_INTERVAL)
@@ -197,7 +207,13 @@ async def async_setup_entry(
                 name, entry["type"], entry["command"]
             )
             new_entities = _create_time_entities(
-                name, entry, device, device_id, write_interval, entity_id_style
+                name,
+                entry,
+                device,
+                device_id,
+                write_interval,
+                entity_id_style,
+                entity_visibility,
             )
             entities.extend(
                 new_entities if isinstance(new_entities, list) else [new_entities]
@@ -220,6 +236,7 @@ class THZTime(THZBaseEntity, TimeEntity):
         device_id: str,
         scan_interval: int | None = None,
         entity_id_style: str = "default",
+        entity_visibility: str = "default",
     ) -> None:
         """Initialize a THZ time entity.
 
@@ -230,6 +247,7 @@ class THZTime(THZBaseEntity, TimeEntity):
             device_id: The device identifier for linking to device.
             scan_interval: The scan interval in seconds for polling updates.
             entity_id_style: "default" or "fhem" (see base_entity.py).
+            entity_visibility: "default"/"extended"/"all" (see base_entity.py).
         """
         # Initialize base class with common properties
         super().__init__(
@@ -241,6 +259,7 @@ class THZTime(THZBaseEntity, TimeEntity):
             scan_interval=scan_interval,
             translation_key=get_translation_key(name),
             entity_id_style=entity_id_style,
+            entity_visibility=entity_visibility,
         )
 
         # Explicitly enable has_entity_name for time entities
@@ -324,6 +343,7 @@ class THZScheduleTime(THZBaseEntity, TimeEntity):
         time_type: str,
         scan_interval: int | None = None,
         entity_id_style: str = "default",
+        entity_visibility: str = "default",
     ) -> None:
         """Initialize a THZ schedule time entity.
 
@@ -342,6 +362,7 @@ class THZScheduleTime(THZBaseEntity, TimeEntity):
                 using the full ``name`` (already including the " Start"/" End"
                 suffix), so the FHEM-style entity_id naturally ends in
                 "_start"/"_end" too.
+            entity_visibility: "default"/"extended"/"all" (see base_entity.py).
 
         Example:
             For base_name="programHC1_Mo_0" and time_type="start", the translation key
@@ -365,6 +386,7 @@ class THZScheduleTime(THZBaseEntity, TimeEntity):
             scan_interval=scan_interval,
             translation_key=translation_key,
             entity_id_style=entity_id_style,
+            entity_visibility=entity_visibility,
         )
 
         # Explicitly enable has_entity_name for time entities
