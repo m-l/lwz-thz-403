@@ -329,11 +329,17 @@ class THZGenericSensor(CoordinatorEntity, SensorEntity):
         )
 
         # Entity-ID naming style: independent of translation_key/unique_id.
+        # NOTE: Home Assistant has no "_attr_suggested_object_id" hook --
+        # Entity.suggested_object_id is a read-only @property, never backed by
+        # an "_attr_*" instance attribute. Setting self.entity_id directly
+        # (before this entity is added to hass) is the actually-supported way
+        # to seed a custom initial object_id -- see base_entity.py's
+        # THZBaseEntity.__init__ for the full explanation.
         suggested_object_id = resolve_suggested_object_id(
             self._entity_name, entity_id_style, device_prefix=entity_id_prefix
         )
         if suggested_object_id:
-            self._attr_suggested_object_id = suggested_object_id
+            self.entity_id = f"sensor.{suggested_object_id}"
 
     @property
     def native_value(self) -> StateType | int | float | bool | str | None:

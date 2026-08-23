@@ -85,6 +85,7 @@ class THZButton(THZBaseEntity, ButtonEntity):
             entity_id_style=entity_id_style,
             entity_visibility=entity_visibility,
             entity_id_prefix=entity_id_prefix,
+            domain="button",
         )
 
     async def async_added_to_hass(self) -> None:

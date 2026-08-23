@@ -270,6 +270,7 @@ class THZTime(THZBaseEntity, TimeEntity):
             entity_id_style=entity_id_style,
             entity_visibility=entity_visibility,
             entity_id_prefix=entity_id_prefix,
+            domain="time",
         )
 
         # Explicitly enable has_entity_name for time entities
@@ -401,6 +402,7 @@ class THZScheduleTime(THZBaseEntity, TimeEntity):
             entity_id_style=entity_id_style,
             entity_visibility=entity_visibility,
             entity_id_prefix=entity_id_prefix,
+            domain="time",
         )
 
         # Explicitly enable has_entity_name for time entities

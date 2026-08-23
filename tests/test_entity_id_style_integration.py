@@ -1,9 +1,17 @@
-"""Integration tests: entity_id_style threads through to _attr_suggested_object_id.
+"""Integration tests: entity_id_style threads through to self.entity_id.
 
 Verifies the full path from each platform's entity class -> THZBaseEntity /
 THZGenericSensor / THZBinarySensor -> entity_id_style.resolve_suggested_object_id(),
 for both the write-entity platforms (number/switch/select/time) and the
 read-entity platforms (sensor/binary_sensor).
+
+These assert on ``entity.entity_id`` rather than ``entity._attr_suggested_object_id``:
+Home Assistant's real ``Entity.suggested_object_id`` is a read-only @property
+computed from name/translations and never consults any "_attr_*" instance
+attribute, so setting one is a silent no-op against the real entity_platform
+pipeline. Setting ``self.entity_id`` directly (what the production code now
+does) is the mechanism entity_platform.py actually honors -- see
+base_entity.py's THZBaseEntity.__init__.
 """
 from unittest.mock import MagicMock
 
@@ -31,7 +39,7 @@ class TestWriteEntityIdStyle:
             device_id="test_device",
             entity_id_style="default",
         )
-        assert getattr(entity, "_attr_suggested_object_id", None) is None
+        assert entity.entity_id is None
 
     def test_switch_fhem_style_sets_suggested_object_id(self):
         from custom_components.thz.switch import THZSwitch
@@ -43,7 +51,7 @@ class TestWriteEntityIdStyle:
             device_id="test_device",
             entity_id_style="fhem",
         )
-        assert entity._attr_suggested_object_id == fhem_style_object_id("zPumpHC")
+        assert entity.entity_id == f"switch.{fhem_style_object_id('zPumpHC')}"
 
     def test_number_fhem_style_sets_suggested_object_id(self):
         from custom_components.thz.number import THZNumber
@@ -65,7 +73,7 @@ class TestWriteEntityIdStyle:
             device_id="test_device",
             entity_id_style="fhem",
         )
-        assert entity._attr_suggested_object_id == "p01_room_temp_day_hc1"
+        assert entity.entity_id == "number.p01_room_temp_day_hc1"
 
     def test_select_fhem_style_sets_suggested_object_id(self):
         from custom_components.thz.select import THZSelect
@@ -77,7 +85,7 @@ class TestWriteEntityIdStyle:
             device_id="test_device",
             entity_id_style="fhem",
         )
-        assert entity._attr_suggested_object_id == "p_op_mode"
+        assert entity.entity_id == "select.p_op_mode"
 
     def test_time_fhem_style_sets_suggested_object_id(self):
         from custom_components.thz.time import THZTime
@@ -89,9 +97,7 @@ class TestWriteEntityIdStyle:
             device_id="test_device",
             entity_id_style="fhem",
         )
-        assert entity._attr_suggested_object_id == fhem_style_object_id(
-            "pHolidayBeginTime"
-        )
+        assert entity.entity_id == f"time.{fhem_style_object_id('pHolidayBeginTime')}"
 
     def test_schedule_time_fhem_style_includes_start_end_suffix(self):
         from custom_components.thz.time import THZScheduleTime
@@ -115,8 +121,8 @@ class TestWriteEntityIdStyle:
             time_type="end",
             entity_id_style="fhem",
         )
-        assert start_entity._attr_suggested_object_id == "program_hc1_mo_0_start"
-        assert end_entity._attr_suggested_object_id == "program_hc1_mo_0_end"
+        assert start_entity.entity_id == "time.program_hc1_mo_0_start"
+        assert end_entity.entity_id == "time.program_hc1_mo_0_end"
 
     def test_default_entity_id_style_is_backward_compatible(self):
         """Omitting entity_id_style entirely still works (defaults to "default")."""
@@ -128,7 +134,7 @@ class TestWriteEntityIdStyle:
             device=_make_mock_device(),
             device_id="test_device",
         )
-        assert getattr(entity, "_attr_suggested_object_id", None) is None
+        assert entity.entity_id is None
 
     def test_button_fhem_style_sets_suggested_object_id(self):
         from custom_components.thz.button import THZButton
@@ -140,9 +146,7 @@ class TestWriteEntityIdStyle:
             device_id="test_device",
             entity_id_style="fhem",
         )
-        assert entity._attr_suggested_object_id == fhem_style_object_id(
-            "zResetLast10errors"
-        )
+        assert entity.entity_id == f"button.{fhem_style_object_id('zResetLast10errors')}"
 
     def test_button_default_style_leaves_suggested_object_id_unset(self):
         from custom_components.thz.button import THZButton
@@ -154,7 +158,7 @@ class TestWriteEntityIdStyle:
             device_id="test_device",
             entity_id_style="default",
         )
-        assert getattr(entity, "_attr_suggested_object_id", None) is None
+        assert entity.entity_id is None
 
 
 class TestReadEntityIdStyle:
@@ -178,7 +182,7 @@ class TestReadEntityIdStyle:
             device_id="test_device",
             entity_id_style="default",
         )
-        assert getattr(entity, "_attr_suggested_object_id", None) is None
+        assert entity.entity_id is None
 
     def test_generic_sensor_fhem_style_sets_suggested_object_id(self):
         from custom_components.thz.sensor import THZGenericSensor
@@ -198,7 +202,7 @@ class TestReadEntityIdStyle:
             device_id="test_device",
             entity_id_style="fhem",
         )
-        assert entity._attr_suggested_object_id == "collector_temp"
+        assert entity.entity_id == "sensor.collector_temp"
 
     def test_binary_sensor_default_style_leaves_suggested_object_id_unset(self):
         from custom_components.thz.binary_sensor import THZBinarySensor
@@ -219,7 +223,7 @@ class TestReadEntityIdStyle:
             device_id="test_device",
             entity_id_style="default",
         )
-        assert getattr(entity, "_attr_suggested_object_id", None) is None
+        assert entity.entity_id is None
 
     def test_binary_sensor_fhem_style_sets_suggested_object_id(self):
         from custom_components.thz.binary_sensor import THZBinarySensor
@@ -240,7 +244,7 @@ class TestReadEntityIdStyle:
             device_id="test_device",
             entity_id_style="fhem",
         )
-        assert entity._attr_suggested_object_id == "dhw_pump"
+        assert entity.entity_id == "binary_sensor.dhw_pump"
 
 
 class TestPlatformSetupPassesEntityIdStyle:
@@ -287,7 +291,7 @@ class TestPlatformSetupPassesEntityIdStyle:
         )
 
         assert len(added) == 1
-        assert getattr(added[0], "_attr_suggested_object_id", None) is None
+        assert added[0].entity_id is None
 
     @pytest.mark.asyncio
     async def test_write_platform_creates_button_entities_without_error(self):
@@ -338,7 +342,7 @@ class TestPlatformSetupPassesEntityIdStyle:
         )
 
         assert len(added) == 1
-        assert added[0]._attr_suggested_object_id == "lwz_z_reset_last10errors"
+        assert added[0].entity_id == "button.lwz_z_reset_last10errors"
 
 
 class TestEntityIdPrefix:
@@ -355,7 +359,7 @@ class TestEntityIdPrefix:
             entity_id_style="fhem",
             entity_id_prefix="lwz",
         )
-        assert entity._attr_suggested_object_id == "lwz_z_pump_hc"
+        assert entity.entity_id == "switch.lwz_z_pump_hc"
 
     def test_number_fhem_style_with_prefix(self):
         from custom_components.thz.number import THZNumber
@@ -378,7 +382,7 @@ class TestEntityIdPrefix:
             entity_id_style="fhem",
             entity_id_prefix="lwz",
         )
-        assert entity._attr_suggested_object_id == "lwz_p99start_unsched_vent"
+        assert entity.entity_id == "number.lwz_p99start_unsched_vent"
 
     def test_button_fhem_style_with_prefix(self):
         from custom_components.thz.button import THZButton
@@ -391,7 +395,7 @@ class TestEntityIdPrefix:
             entity_id_style="fhem",
             entity_id_prefix="lwz",
         )
-        assert entity._attr_suggested_object_id == "lwz_z_reset_last10errors"
+        assert entity.entity_id == "button.lwz_z_reset_last10errors"
 
     def test_default_style_ignores_prefix(self):
         """entity_id_prefix has no effect when entity_id_style is "default"."""
@@ -405,7 +409,7 @@ class TestEntityIdPrefix:
             entity_id_style="default",
             entity_id_prefix="lwz",
         )
-        assert getattr(entity, "_attr_suggested_object_id", None) is None
+        assert entity.entity_id is None
 
     def test_schedule_time_fhem_style_with_prefix(self):
         from custom_components.thz.time import THZScheduleTime
@@ -421,7 +425,7 @@ class TestEntityIdPrefix:
             entity_id_style="fhem",
             entity_id_prefix="lwz",
         )
-        assert start_entity._attr_suggested_object_id == "lwz_program_hc1_mo_0_start"
+        assert start_entity.entity_id == "time.lwz_program_hc1_mo_0_start"
 
     def test_generic_sensor_fhem_style_with_prefix(self):
         from custom_components.thz.sensor import THZGenericSensor
@@ -442,7 +446,7 @@ class TestEntityIdPrefix:
             entity_id_style="fhem",
             entity_id_prefix="lwz",
         )
-        assert entity._attr_suggested_object_id == "lwz_collector_temp"
+        assert entity.entity_id == "sensor.lwz_collector_temp"
 
     def test_binary_sensor_fhem_style_with_prefix(self):
         from custom_components.thz.binary_sensor import THZBinarySensor
@@ -464,7 +468,7 @@ class TestEntityIdPrefix:
             entity_id_style="fhem",
             entity_id_prefix="lwz",
         )
-        assert entity._attr_suggested_object_id == "lwz_dhw_pump"
+        assert entity.entity_id == "binary_sensor.lwz_dhw_pump"
 
     @pytest.mark.asyncio
     async def test_write_platform_passes_entity_id_prefix_through(self):
@@ -508,4 +512,4 @@ class TestEntityIdPrefix:
         )
 
         assert len(added) == 1
-        assert added[0]._attr_suggested_object_id == "lwz_z_pump_hc"
+        assert added[0].entity_id == "switch.lwz_z_pump_hc"

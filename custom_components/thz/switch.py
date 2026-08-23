@@ -74,6 +74,7 @@ class THZSwitch(THZBaseEntity, SwitchEntity):
             entity_id_style=entity_id_style,
             entity_visibility=entity_visibility,
             entity_id_prefix=entity_id_prefix,
+            domain="switch",
         )
 
         # Switch-specific attributes
