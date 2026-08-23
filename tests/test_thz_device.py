@@ -2,7 +2,7 @@
 
 import pytest
 
-from custom_components.thz.thz_device import THZDevice
+from custom_components.thz.thz_device import THZDevice, THZRegisterNotSupportedError
 
 
 class TestTHZDeviceInitialization:
@@ -203,12 +203,130 @@ class TestFirmwareVersion:
         """Test firmware_version property."""
         device = THZDevice(connection="usb", port="/dev/null")
         device._firmware_version = "206"
-        
+
         assert device.firmware_version == "206"
 
     def test_firmware_version_none(self):
         """Test firmware_version raises error when not initialized."""
         device = THZDevice(connection="usb", port="/dev/null")
-        
+
         with pytest.raises(RuntimeError, match="Device not initialized"):
             _ = device.firmware_version
+
+
+class TestFirmwareOverride:
+    """Tests for the firmware_override config option and its resolution.
+
+    _resolve_effective_firmware() decides which firmware string actually
+    drives register-map selection: the auto-detected value, unless an
+    override was configured to force a specific FHEM-style profile (e.g.
+    "439technician") regardless of what the device reports.
+    """
+
+    def test_firmware_override_defaults_to_none(self):
+        """Test that no override is applied unless explicitly configured."""
+        device = THZDevice(connection="usb", port="/dev/null")
+        assert device._firmware_override is None
+
+    def test_firmware_override_stored(self):
+        """Test that a configured override is stored on the device."""
+        device = THZDevice(
+            connection="usb", port="/dev/null", firmware_override="539"
+        )
+        assert device._firmware_override == "539"
+
+    def test_no_override_uses_detected_firmware(self):
+        """Test that effective firmware falls back to the detected value."""
+        device = THZDevice(connection="usb", port="/dev/null")
+        device._firmware_version = "438"
+        assert device._resolve_effective_firmware() == "438"
+
+    def test_auto_override_uses_detected_firmware(self):
+        """Test that an explicit "auto" override behaves like no override."""
+        device = THZDevice(
+            connection="usb", port="/dev/null", firmware_override="auto"
+        )
+        device._firmware_version = "438"
+        assert device._resolve_effective_firmware() == "438"
+
+    def test_explicit_override_wins_over_detected_firmware(self):
+        """Test that a non-"auto" override takes precedence for map selection."""
+        device = THZDevice(
+            connection="usb", port="/dev/null", firmware_override="439technician"
+        )
+        device._firmware_version = "438"
+        assert device._resolve_effective_firmware() == "439technician"
+
+    def test_override_does_not_change_reported_firmware_version(self):
+        """Test that firmware_version still reflects the real detected value.
+
+        The override only affects which register maps get loaded; the
+        displayed/diagnostic firmware_version should stay truthful about
+        what the device actually reported.
+        """
+        device = THZDevice(
+            connection="usb", port="/dev/null", firmware_override="439technician"
+        )
+        device._firmware_version = "438"
+        assert device._resolve_effective_firmware() == "439technician"
+        assert device.firmware_version == "438"
+
+
+class TestDecodeResponse:
+    """Tests for decode_response()'s protocol-error handling.
+
+    Regression coverage for a bug where a clean "01 04" (register not
+    supported) response was deliberately raised as
+    THZRegisterNotSupportedError, but then immediately swallowed by this
+    same method's own blanket ``except Exception`` and downgraded to a
+    plain ``None`` — indistinguishable from a genuine decode failure. That
+    caused registers the device doesn't support (e.g. 5.39-only registers
+    on 4.3x firmware) to crash the whole config entry's first refresh
+    instead of being skipped gracefully, one block at a time.
+    """
+
+    def test_register_not_supported_raises(self):
+        """Test that a "01 04" response raises THZRegisterNotSupportedError."""
+        device = THZDevice(connection="usb", port="/dev/null")
+        data = b"\x01\x04\x00\x00\x10\x03"
+
+        with pytest.raises(THZRegisterNotSupportedError):
+            device.decode_response(data)
+
+    def test_short_response_returns_none(self):
+        """Test that a too-short response returns None, not an exception."""
+        device = THZDevice(connection="usb", port="/dev/null")
+        assert device.decode_response(b"\x01\x00") is None
+
+    def test_timing_issue_returns_none(self):
+        """Test that a "01 01" (timing issue) response returns None."""
+        device = THZDevice(connection="usb", port="/dev/null")
+        assert device.decode_response(b"\x01\x01\x00\x00\x10\x03") is None
+
+    def test_crc_error_in_request_returns_none(self):
+        """Test that a "01 02" (CRC error in request) response returns None."""
+        device = THZDevice(connection="usb", port="/dev/null")
+        assert device.decode_response(b"\x01\x02\x00\x00\x10\x03") is None
+
+    def test_unknown_command_returns_none(self):
+        """Test that a "01 03" (unknown command) response returns None."""
+        device = THZDevice(connection="usb", port="/dev/null")
+        assert device.decode_response(b"\x01\x03\x00\x00\x10\x03") is None
+
+    def test_unknown_response_header_returns_none(self):
+        """Test that a completely unrecognized header returns None."""
+        device = THZDevice(connection="usb", port="/dev/null")
+        assert device.decode_response(b"\xff\xff\x00\x00\x10\x03") is None
+
+    def test_bad_checksum_returns_none(self):
+        """Test that a normal-header response with a wrong CRC returns None."""
+        device = THZDevice(connection="usb", port="/dev/null")
+        # header 01 00, wrong crc byte (0x00), payload \xaa\xbb, footer 10 03
+        assert device.decode_response(b"\x01\x00\x00\xaa\xbb\x10\x03") is None
+
+    def test_valid_response_decodes_payload(self):
+        """Test that a well-formed, correctly-checksummed response decodes."""
+        device = THZDevice(connection="usb", port="/dev/null")
+        # header 01 00, correct crc (0x66) for payload \xaa\xbb, footer 10 03
+        result = device.decode_response(b"\x01\x00\x66\xaa\xbb\x10\x03")
+        assert result == b"\x66\xaa\xbb"
