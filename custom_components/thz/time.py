@@ -137,6 +137,7 @@ def _create_time_entities(
     write_interval,
     entity_id_style="default",
     entity_visibility="default",
+    entity_id_prefix=None,
 ):
     """Factory function to create time entities, handling schedule types specially."""
     if entry["type"] == "schedule":
@@ -153,6 +154,7 @@ def _create_time_entities(
                 scan_interval=write_interval,
                 entity_id_style=entity_id_style,
                 entity_visibility=entity_visibility,
+                entity_id_prefix=entity_id_prefix,
             ),
             THZScheduleTime(
                 name=f"{name} End",
@@ -164,6 +166,7 @@ def _create_time_entities(
                 scan_interval=write_interval,
                 entity_id_style=entity_id_style,
                 entity_visibility=entity_visibility,
+                entity_id_prefix=entity_id_prefix,
             ),
         ]
     else:
@@ -176,6 +179,7 @@ def _create_time_entities(
             scan_interval=write_interval,
             entity_id_style=entity_id_style,
             entity_visibility=entity_visibility,
+            entity_id_prefix=entity_id_prefix,
         )
 
 
@@ -192,6 +196,7 @@ async def async_setup_entry(
     device_id = entry_data["device_id"]
     entity_id_style = entry_data.get("entity_id_style", "default")
     entity_visibility = entry_data.get("entity_visibility", "default")
+    entity_id_prefix = entry_data.get("entity_id_prefix")
 
     from .const import DEFAULT_UPDATE_INTERVAL
     write_interval = config_entry.data.get("write_interval", DEFAULT_UPDATE_INTERVAL)
@@ -214,6 +219,7 @@ async def async_setup_entry(
                 write_interval,
                 entity_id_style,
                 entity_visibility,
+                entity_id_prefix,
             )
             entities.extend(
                 new_entities if isinstance(new_entities, list) else [new_entities]
@@ -237,6 +243,7 @@ class THZTime(THZBaseEntity, TimeEntity):
         scan_interval: int | None = None,
         entity_id_style: str = "default",
         entity_visibility: str = "default",
+        entity_id_prefix: str | None = None,
     ) -> None:
         """Initialize a THZ time entity.
 
@@ -248,6 +255,8 @@ class THZTime(THZBaseEntity, TimeEntity):
             scan_interval: The scan interval in seconds for polling updates.
             entity_id_style: "default" or "fhem" (see base_entity.py).
             entity_visibility: "default"/"extended"/"all" (see base_entity.py).
+            entity_id_prefix: Optional device alias prefix for "fhem"-style
+                entity_ids (see base_entity.py).
         """
         # Initialize base class with common properties
         super().__init__(
@@ -260,6 +269,7 @@ class THZTime(THZBaseEntity, TimeEntity):
             translation_key=get_translation_key(name),
             entity_id_style=entity_id_style,
             entity_visibility=entity_visibility,
+            entity_id_prefix=entity_id_prefix,
         )
 
         # Explicitly enable has_entity_name for time entities
@@ -344,6 +354,7 @@ class THZScheduleTime(THZBaseEntity, TimeEntity):
         scan_interval: int | None = None,
         entity_id_style: str = "default",
         entity_visibility: str = "default",
+        entity_id_prefix: str | None = None,
     ) -> None:
         """Initialize a THZ schedule time entity.
 
@@ -363,6 +374,8 @@ class THZScheduleTime(THZBaseEntity, TimeEntity):
                 suffix), so the FHEM-style entity_id naturally ends in
                 "_start"/"_end" too.
             entity_visibility: "default"/"extended"/"all" (see base_entity.py).
+            entity_id_prefix: Optional device alias prefix for "fhem"-style
+                entity_ids (see base_entity.py).
 
         Example:
             For base_name="programHC1_Mo_0" and time_type="start", the translation key
@@ -387,6 +400,7 @@ class THZScheduleTime(THZBaseEntity, TimeEntity):
             translation_key=translation_key,
             entity_id_style=entity_id_style,
             entity_visibility=entity_visibility,
+            entity_id_prefix=entity_id_prefix,
         )
 
         # Explicitly enable has_entity_name for time entities

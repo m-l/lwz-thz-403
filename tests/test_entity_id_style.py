@@ -73,3 +73,61 @@ class TestResolveSuggestedObjectId:
     def test_fhem_style_matches_direct_slug_call(self):
         name = "p01RoomTempDayHC1"
         assert resolve_suggested_object_id(name, "fhem") == fhem_style_object_id(name)
+
+
+class TestDevicePrefix:
+    """Tests for the optional device_prefix argument (short device alias).
+
+    This lets a user set a short device name/alias (e.g. "lwz") that gets
+    prepended to the FHEM-style slug, e.g. "lwz_p99start_unsched_vent",
+    instead of relying on Home Assistant's own has_entity_name fallback
+    (which prepends the FULL device name/alias and only kicks in for the
+    "default" style, where suggested_object_id is left unset entirely).
+    """
+
+    def test_fhem_style_with_prefix(self):
+        assert (
+            resolve_suggested_object_id(
+                "p99startUnschedVent", "fhem", device_prefix="lwz"
+            )
+            == "lwz_p99start_unsched_vent"
+        )
+
+    def test_prefix_is_slugified_same_as_raw_name(self):
+        """A verbose alias is slugified the same way as any raw name."""
+        assert (
+            resolve_suggested_object_id(
+                "dhwPump", "fhem", device_prefix="Heating Clima Water Control LWZ"
+            )
+            == "heating_clima_water_control_lwz_dhw_pump"
+        )
+
+    def test_no_prefix_when_none(self):
+        assert (
+            resolve_suggested_object_id("dhwPump", "fhem", device_prefix=None)
+            == "dhw_pump"
+        )
+
+    def test_no_prefix_when_empty_string(self):
+        assert (
+            resolve_suggested_object_id("dhwPump", "fhem", device_prefix="")
+            == "dhw_pump"
+        )
+
+    def test_no_prefix_when_prefix_has_no_alnum_chars(self):
+        """A prefix that slugifies to nothing usable is dropped, not glued on."""
+        assert (
+            resolve_suggested_object_id("dhwPump", "fhem", device_prefix=":::")
+            == "dhw_pump"
+        )
+
+    def test_prefix_ignored_for_default_style(self):
+        """device_prefix has no effect outside the fhem style."""
+        assert (
+            resolve_suggested_object_id("dhwPump", "default", device_prefix="lwz")
+            is None
+        )
+
+    def test_prefix_is_positional_keyword_only_by_convention(self):
+        """Backward compatible: callers that omit device_prefix still work."""
+        assert resolve_suggested_object_id("dhwPump", "fhem") == "dhw_pump"

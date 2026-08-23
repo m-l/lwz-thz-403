@@ -56,6 +56,7 @@ class THZConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.blocks = []
         self.entity_id_style = ENTITY_ID_STYLE_DEFAULT
         self.entity_visibility = ENTITY_VISIBILITY_DEFAULT
+        self.alias = ""
 
     async def async_step_user(self, user_input=None) -> config_entries.ConfigFlowResult:
         """First step, select connection type and entity naming style."""
@@ -66,6 +67,7 @@ class THZConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self.entity_visibility = user_input.get(
                 CONF_ENTITY_VISIBILITY, ENTITY_VISIBILITY_DEFAULT
             )
+            self.alias = user_input.get("alias", "").strip()
             if user_input["connection_type"] == CONNECTION_IP:
                 return await self.async_step_setup_ip()
             return await self.async_step_setup_usb()
@@ -78,6 +80,12 @@ class THZConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONNECTION_USB: "USB / Serial",
                     }
                 ),
+                # Optional short device name/alias (e.g. "lwz"). Shown as the
+                # device name in HA, and -- when entity_id_style is "fhem" --
+                # prepended to every entity's technical entity_id (e.g.
+                # "lwz_p99start_unsched_vent") so it stays short and
+                # recognisable instead of falling back to a generic default.
+                vol.Optional("alias", default=""): str,
                 # Entity ID naming style, asked up front since it applies to
                 # every entity created during this setup. "fhem" only
                 # changes entity_id (via suggested_object_id) for newly
@@ -555,6 +563,7 @@ class THZConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_ENTITY_VISIBILITY: getattr(
                     self, "entity_visibility", ENTITY_VISIBILITY_DEFAULT
                 ),
+                "alias": getattr(self, "alias", ""),
             }
             conn_target = data.get("host") or data.get("device")
             title = f"THZ ({data['connection_type']}: {conn_target})"

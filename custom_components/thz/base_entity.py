@@ -50,6 +50,7 @@ class THZBaseEntity(Entity):
         translation_key: str | None = None,
         entity_id_style: str = ENTITY_ID_STYLE_DEFAULT,
         entity_visibility: str = ENTITY_VISIBILITY_DEFAULT,
+        entity_id_prefix: str | None = None,
     ) -> None:
         """Initialize base THZ entity.
 
@@ -71,6 +72,10 @@ class THZBaseEntity(Entity):
             entity_visibility: One of the ``ENTITY_VISIBILITY_*`` values from
                 const.py, controlling whether this entity starts out enabled
                 or disabled in the entity registry. See should_hide_entity().
+            entity_id_prefix: Optional device name/alias (e.g. "lwz") to
+                prepend to the FHEM-style entity_id, e.g.
+                "lwz_p99start_unsched_vent". Only used when entity_id_style
+                is "fhem"; ignored otherwise. See resolve_suggested_object_id().
         """
         self._command = command
         self._device = device
@@ -101,7 +106,9 @@ class THZBaseEntity(Entity):
         # Entity-ID naming style: independent of unique_id/translation_key
         # (see resolve_suggested_object_id's docstring for details). Only
         # takes effect the first time HA creates this entity.
-        suggested_object_id = resolve_suggested_object_id(name, entity_id_style)
+        suggested_object_id = resolve_suggested_object_id(
+            name, entity_id_style, device_prefix=entity_id_prefix
+        )
         if suggested_object_id:
             self._attr_suggested_object_id = suggested_object_id
 

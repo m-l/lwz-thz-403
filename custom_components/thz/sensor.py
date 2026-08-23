@@ -71,6 +71,7 @@ async def async_setup_entry(
     unsupported_blocks: set[str] = entry_data.get("unsupported_blocks", set())
     entity_id_style = entry_data.get("entity_id_style", ENTITY_ID_STYLE_DEFAULT)
     entity_visibility = entry_data.get("entity_visibility", ENTITY_VISIBILITY_DEFAULT)
+    entity_id_prefix = entry_data.get("entity_id_prefix")
 
     # Create sensors
     sensors = []
@@ -157,6 +158,7 @@ async def async_setup_entry(
                     device_id=device_id,
                     entity_id_style=entity_id_style,
                     entity_visibility=entity_visibility,
+                    entity_id_prefix=entity_id_prefix,
                 )
             )
     async_add_entities(sensors, True)
@@ -271,6 +273,7 @@ class THZGenericSensor(CoordinatorEntity, SensorEntity):
         device_id,
         entity_id_style=ENTITY_ID_STYLE_DEFAULT,
         entity_visibility=ENTITY_VISIBILITY_DEFAULT,
+        entity_id_prefix=None,
     ) -> None:
         """Initialize a sensor instance with the provided configuration.
 
@@ -282,6 +285,8 @@ class THZGenericSensor(CoordinatorEntity, SensorEntity):
             entity_id_style: "default" or "fhem" (see entity_id_style.py).
             entity_visibility: "default"/"extended"/"all" (see const.py's
                 should_hide_entity()).
+            entity_id_prefix: Optional device alias prefix for "fhem"-style
+                entity_ids (see entity_id_style.py).
 
         Note:
             When translation_key is available, only _attr_translation_key is set.
@@ -325,7 +330,7 @@ class THZGenericSensor(CoordinatorEntity, SensorEntity):
 
         # Entity-ID naming style: independent of translation_key/unique_id.
         suggested_object_id = resolve_suggested_object_id(
-            self._entity_name, entity_id_style
+            self._entity_name, entity_id_style, device_prefix=entity_id_prefix
         )
         if suggested_object_id:
             self._attr_suggested_object_id = suggested_object_id

@@ -95,6 +95,7 @@ async def async_setup_entry(
     device_id = entry_data["device_id"]
     entity_id_style = entry_data.get("entity_id_style", ENTITY_ID_STYLE_DEFAULT)
     entity_visibility = entry_data.get("entity_visibility", ENTITY_VISIBILITY_DEFAULT)
+    entity_id_prefix = entry_data.get("entity_id_prefix")
 
     entities: list[THZBinarySensor] = []
     seen_sensor_names: set[str] = set()
@@ -160,6 +161,7 @@ async def async_setup_entry(
                     device_id=device_id,
                     entity_id_style=entity_id_style,
                     entity_visibility=entity_visibility,
+                    entity_id_prefix=entity_id_prefix,
                 )
             )
 
@@ -190,6 +192,7 @@ class THZBinarySensor(CoordinatorEntity, BinarySensorEntity):
         device_id: str,
         entity_id_style: str = ENTITY_ID_STYLE_DEFAULT,
         entity_visibility: str = ENTITY_VISIBILITY_DEFAULT,
+        entity_id_prefix: str | None = None,
     ) -> None:
         """Initialize a THZBinarySensor.
 
@@ -202,6 +205,8 @@ class THZBinarySensor(CoordinatorEntity, BinarySensorEntity):
             entity_id_style: "default" or "fhem" (see entity_id_style.py).
             entity_visibility: "default"/"extended"/"all" (see const.py's
                 should_hide_entity()).
+            entity_id_prefix: Optional device alias prefix for "fhem"-style
+                entity_ids (see entity_id_style.py).
         """
         super().__init__(coordinator)
 
@@ -232,7 +237,7 @@ class THZBinarySensor(CoordinatorEntity, BinarySensorEntity):
 
         # Entity-ID naming style: independent of translation_key/unique_id.
         suggested_object_id = resolve_suggested_object_id(
-            self._entity_name, entity_id_style
+            self._entity_name, entity_id_style, device_prefix=entity_id_prefix
         )
         if suggested_object_id:
             self._attr_suggested_object_id = suggested_object_id

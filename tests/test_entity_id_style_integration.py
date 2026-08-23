@@ -262,3 +262,160 @@ class TestPlatformSetupPassesEntityIdStyle:
 
         assert len(added) == 1
         assert getattr(added[0], "_attr_suggested_object_id", None) is None
+
+
+class TestEntityIdPrefix:
+    """entity_id_prefix (short device alias) threads through to fhem-style ids."""
+
+    def test_switch_fhem_style_with_prefix(self):
+        from custom_components.thz.switch import THZSwitch
+
+        entity = THZSwitch(
+            name="zPumpHC",
+            entry={"command": "0A0052", "type": "switch", "icon": ""},
+            device=_make_mock_device(),
+            device_id="test_device",
+            entity_id_style="fhem",
+            entity_id_prefix="lwz",
+        )
+        assert entity._attr_suggested_object_id == "lwz_z_pump_hc"
+
+    def test_number_fhem_style_with_prefix(self):
+        from custom_components.thz.number import THZNumber
+
+        entity = THZNumber(
+            name="p99startUnschedVent",
+            entry={
+                "command": "0A0800",
+                "type": "number",
+                "icon": "",
+                "min": 0,
+                "max": 100,
+                "step": 1,
+                "unit": "",
+                "device_class": "",
+                "decode_type": "0clean",
+            },
+            device=_make_mock_device(),
+            device_id="test_device",
+            entity_id_style="fhem",
+            entity_id_prefix="lwz",
+        )
+        assert entity._attr_suggested_object_id == "lwz_p99start_unsched_vent"
+
+    def test_default_style_ignores_prefix(self):
+        """entity_id_prefix has no effect when entity_id_style is "default"."""
+        from custom_components.thz.switch import THZSwitch
+
+        entity = THZSwitch(
+            name="zPumpHC",
+            entry={"command": "0A0052", "type": "switch", "icon": ""},
+            device=_make_mock_device(),
+            device_id="test_device",
+            entity_id_style="default",
+            entity_id_prefix="lwz",
+        )
+        assert getattr(entity, "_attr_suggested_object_id", None) is None
+
+    def test_schedule_time_fhem_style_with_prefix(self):
+        from custom_components.thz.time import THZScheduleTime
+
+        entry = {"command": "0A0500", "type": "schedule", "icon": "mdi:calendar-clock"}
+        start_entity = THZScheduleTime(
+            name="programHC1_Mo_0 Start",
+            base_name="programHC1_Mo_0",
+            entry=entry,
+            device=_make_mock_device(),
+            device_id="test_device",
+            time_type="start",
+            entity_id_style="fhem",
+            entity_id_prefix="lwz",
+        )
+        assert start_entity._attr_suggested_object_id == "lwz_program_hc1_mo_0_start"
+
+    def test_generic_sensor_fhem_style_with_prefix(self):
+        from custom_components.thz.sensor import THZGenericSensor
+
+        coordinator = MagicMock()
+        coordinator.data = bytes(10)
+        entity = THZGenericSensor(
+            coordinator,
+            entry={
+                "name": "collectorTemp",
+                "offset": 4,
+                "length": 2,
+                "decode": "hex2int",
+                "factor": 10,
+            },
+            block=bytes.fromhex("16"),
+            device_id="test_device",
+            entity_id_style="fhem",
+            entity_id_prefix="lwz",
+        )
+        assert entity._attr_suggested_object_id == "lwz_collector_temp"
+
+    def test_binary_sensor_fhem_style_with_prefix(self):
+        from custom_components.thz.binary_sensor import THZBinarySensor
+
+        coordinator = MagicMock()
+        coordinator.data = bytes([0x08])
+        entity = THZBinarySensor(
+            coordinator,
+            entry={
+                "name": "dhwPump",
+                "offset": 22,
+                "length": 1,
+                "decode": "bit0",
+                "icon": "mdi:pump",
+                "translation_key": "dhw_pump",
+            },
+            block=bytes.fromhex("FB"),
+            device_id="test_device",
+            entity_id_style="fhem",
+            entity_id_prefix="lwz",
+        )
+        assert entity._attr_suggested_object_id == "lwz_dhw_pump"
+
+    @pytest.mark.asyncio
+    async def test_write_platform_passes_entity_id_prefix_through(self):
+        """async_setup_write_platform reads entity_id_prefix from entry_data."""
+        from custom_components.thz.platform_setup import async_setup_write_platform
+        from custom_components.thz.switch import THZSwitch
+        from custom_components.thz.const import DOMAIN
+
+        hass = MagicMock()
+        entry_id = "test_entry"
+        hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "write_manager": MagicMock(
+                        get_all_registers=MagicMock(
+                            return_value={
+                                "zPumpHC": {
+                                    "command": "0A0052",
+                                    "type": "switch",
+                                    "icon": "",
+                                }
+                            }
+                        )
+                    ),
+                    "device": _make_mock_device(),
+                    "device_id": "test_device",
+                    "entity_id_style": "fhem",
+                    "entity_id_prefix": "lwz",
+                }
+            }
+        }
+        config_entry = MagicMock()
+        config_entry.entry_id = entry_id
+        config_entry.data = {}
+
+        added = []
+        async_add_entities = MagicMock(side_effect=lambda entities, *_a, **_kw: added.extend(entities))
+
+        await async_setup_write_platform(
+            hass, config_entry, async_add_entities, THZSwitch, "switch"
+        )
+
+        assert len(added) == 1
+        assert added[0]._attr_suggested_object_id == "lwz_z_pump_hc"

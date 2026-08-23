@@ -615,3 +615,91 @@ class TestEntityVisibilityOption:
         assert captured["data"][CONF_ENTITY_VISIBILITY] == "extended"
 
 
+class TestAliasOption:
+    """Tests for the "alias" field exposed in the initial setup flow.
+
+    "alias" is the short device name (e.g. "lwz") used both as the HA device
+    name and -- when entity_id_style is "fhem" -- as the entity_id prefix
+    (see entity_id_style.resolve_suggested_object_id). It was previously only
+    settable via Reconfigure; this covers it also being settable up front.
+    """
+
+    def test_init_defaults_to_empty_alias(self):
+        flow = THZConfigFlow()
+        assert flow.alias == ""
+
+    def test_async_step_user_schema_includes_alias(self):
+        """The very first setup step's schema offers the alias field."""
+        import asyncio
+        import voluptuous as vol
+
+        vol.Optional.reset_mock()
+        flow = THZConfigFlow()
+        flow.async_show_form = MagicMock(side_effect=lambda **kw: kw)
+        asyncio.run(flow.async_step_user(None))
+
+        assert any(
+            call.args and call.args[0] == "alias"
+            for call in vol.Optional.call_args_list
+        )
+
+    def test_async_step_user_captures_alias_and_strips_whitespace(self):
+        import asyncio
+        from custom_components.thz.const import CONNECTION_USB
+
+        flow = THZConfigFlow()
+
+        async def fake_setup_usb():
+            return "usb_step"
+
+        flow.async_step_setup_usb = fake_setup_usb
+
+        result = asyncio.run(
+            flow.async_step_user(
+                {"connection_type": CONNECTION_USB, "alias": "  lwz  "}
+            )
+        )
+        assert flow.alias == "lwz"
+        assert result == "usb_step"
+
+    def test_async_step_user_defaults_alias_to_empty_when_omitted(self):
+        import asyncio
+        from custom_components.thz.const import CONNECTION_USB
+
+        flow = THZConfigFlow()
+
+        async def fake_setup_usb():
+            return "usb_step"
+
+        flow.async_step_setup_usb = fake_setup_usb
+
+        asyncio.run(flow.async_step_user({"connection_type": CONNECTION_USB}))
+        assert flow.alias == ""
+
+    def test_refresh_blocks_final_data_includes_alias(self):
+        """The final config-entry data dict carries the chosen alias."""
+        import asyncio
+        from custom_components.thz.const import DEFAULT_UPDATE_INTERVAL
+
+        flow = THZConfigFlow()
+        flow.connection_data = {"connection_type": "ip", "host": "1.2.3.4"}
+        flow.blocks = []
+        flow.alias = "lwz"
+
+        captured = {}
+
+        def fake_create_entry(title, data):
+            captured["data"] = data
+            return {"title": title, "data": data}
+
+        flow.async_create_entry = fake_create_entry
+
+        asyncio.run(
+            flow.async_step_refresh_blocks(
+                {"write_interval": DEFAULT_UPDATE_INTERVAL}
+            )
+        )
+
+        assert captured["data"]["alias"] == "lwz"
+
+

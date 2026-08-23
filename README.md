@@ -105,13 +105,31 @@ regardless of the chosen tier.
 
 An **Entity ID Style** option (also set during initial setup or via
 Reconfigure) controls how `entity_id`s are generated for newly created
-entities: `Default` uses this integration's own descriptive naming, while
-`FHEM/technical` derives the `entity_id` from the raw FHEM/Stiebel Eltron
-register field name instead (e.g. `dhwPump`, `p01RoomTempDayHC1`) — handy if
-you're porting dashboards or automations from FHEM. This only affects the
-`entity_id`; the displayed friendly name is unchanged either way, and it only
-applies to entities created from that point on — it does not rename entities
-that already exist.
+entities:
+
+- `Default` leaves entity_id generation to Home Assistant itself. For
+  entities with a translated name (most of them), HA's own convention
+  prepends the *full* device name/alias, e.g.
+  `number.my_heat_pump_start_unscheduled_ventilation` — this can get long
+  with a descriptive alias.
+- `FHEM/technical` derives the `entity_id` from the raw FHEM/Stiebel Eltron
+  register field name instead (e.g. `dhwPump` → `dhw_pump`,
+  `p99startUnschedVent` → `p99start_unsched_vent`) — handy if you're porting
+  dashboards or automations from FHEM. If you've set a short **alias**
+  (below), it's prepended too, e.g. `lwz_p99start_unsched_vent`, instead of
+  Home Assistant's own full-device-name prefix.
+
+Either way, this only affects the `entity_id`; the displayed friendly name is
+unchanged, and it only applies to entities created from that point on — it
+does not rename entities that already exist.
+
+### Device Alias
+
+An optional **alias** (settable during initial setup or via Reconfigure)
+sets a short, custom device name — e.g. `lwz` — shown as the device name in
+Home Assistant, and used as the entity_id prefix described above when
+Entity ID Style is `FHEM/technical`. If left blank, the device falls back to
+a name derived from the connection details (e.g. `THZ 192.168.1.5`).
 
 ### COP (Coefficient of Performance) Sensors
 

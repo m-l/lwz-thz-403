@@ -73,20 +73,39 @@ def fhem_style_object_id(raw_name: str) -> str:
     return name or "thz_entity"
 
 
-def resolve_suggested_object_id(raw_name: str, entity_id_style: str) -> str | None:
+def resolve_suggested_object_id(
+    raw_name: str,
+    entity_id_style: str,
+    device_prefix: str | None = None,
+) -> str | None:
     """Return the HA ``suggested_object_id`` for the given naming style.
 
     Args:
         raw_name: The internal register-map/parameter name for this entity.
         entity_id_style: One of the ``ENTITY_ID_STYLE_*`` values from const.py.
+        device_prefix: Optional device name/alias (e.g. the config flow's
+            "alias" field, such as "lwz") to prepend to the FHEM-style slug,
+            e.g. "lwz_p99start_unsched_vent" instead of bare
+            "p99start_unsched_vent". Slugified the same way as ``raw_name``.
+            Ignored (no prefix applied) if empty/None, or if it slugifies to
+            nothing usable. Has no effect for the default style.
 
     Returns:
         ``None`` for the default style (HA falls back to its own normal
-        name-derived entity_id, i.e. no override), or the FHEM-style slug
-        for :data:`ENTITY_ID_STYLE_FHEM`. Note this only affects a
-        brand-new entity's *first* entity_id assignment -- it does not
-        rename an entity that already exists in the entity registry.
+        name-derived entity_id, i.e. no override -- note this normal
+        fallback itself prepends the *full* device name for any entity with
+        ``has_entity_name=True``, per Home Assistant's own
+        ``Entity.suggested_object_id`` behavior), or the FHEM-style slug
+        (optionally device_prefix-prefixed) for :data:`ENTITY_ID_STYLE_FHEM`.
+        Note this only affects a brand-new entity's *first* entity_id
+        assignment -- it does not rename an entity that already exists in
+        the entity registry.
     """
     if entity_id_style != ENTITY_ID_STYLE_FHEM:
         return None
-    return fhem_style_object_id(raw_name)
+    slug = fhem_style_object_id(raw_name)
+    if device_prefix:
+        prefix_slug = fhem_style_object_id(device_prefix)
+        if prefix_slug and prefix_slug != "thz_entity":
+            return f"{prefix_slug}_{slug}"
+    return slug

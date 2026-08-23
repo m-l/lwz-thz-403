@@ -44,6 +44,17 @@ All notable changes to the THZ integration are documented here.
   rename or break any entity that already exists in your setup; it only
   applies going forward, to newly created entities.
 
+  Fixed a follow-up gap in this feature: on "Default" style, Home Assistant's
+  own `has_entity_name` fallback prepends the *full* device name/alias to
+  every translated entity's entity_id (e.g.
+  `number.heating_clima_water_control_lwz_start_unscheduled_ventilation`),
+  which the "FHEM/technical" style didn't previously account for. Added an
+  optional **alias** field (now settable during initial setup too, not just
+  via Reconfigure) that, when set, is prepended as a short prefix to the
+  FHEM-style entity_id instead — e.g. alias `lwz` + register field
+  `p99startUnschedVent` → `number.lwz_p99start_unsched_vent`. No prefix is
+  added if no alias is set.
+
 - **Solar circuit and live fan status for firmware 4.39/5.39** (`pxx16` / `sSol`,
   command `16`, and `pxxE8` / `sFan`, command `E8`): Ports two more FHEM blocks that
   had no equivalent in this fork at all. `pxx16` adds `collector_temp`, `dhw_temp`,

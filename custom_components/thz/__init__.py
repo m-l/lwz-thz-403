@@ -61,6 +61,11 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
     firmware_override = data.get(CONF_FIRMWARE_OVERRIDE, FIRMWARE_OVERRIDE_AUTO)
     entity_id_style = data.get(CONF_ENTITY_ID_STYLE, ENTITY_ID_STYLE_DEFAULT)
     entity_visibility = data.get(CONF_ENTITY_VISIBILITY, ENTITY_VISIBILITY_DEFAULT)
+    # Short device name/alias, used (only for entity_id_style="fhem") as a
+    # prefix on every entity's technical entity_id, e.g.
+    # "lwz_p99start_unsched_vent". None when no alias was set, in which case
+    # the FHEM-style entity_id has no prefix at all.
+    entity_id_prefix = data.get("alias") or None
 
     # 1. Initialize device
     if conn_type == "ip":
@@ -191,6 +196,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
         "unsupported_blocks": unsupported_blocks,
         "entity_id_style": entity_id_style,
         "entity_visibility": entity_visibility,
+        "entity_id_prefix": entity_id_prefix,
     }
 
     # Forward setup to platforms
