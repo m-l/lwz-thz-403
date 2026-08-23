@@ -161,6 +161,59 @@ class TestWriteEntityIdStyle:
         assert entity.entity_id is None
 
 
+class TestClimateEntityIdStyle:
+    """THZClimate honours entity_id_style too.
+
+    THZClimate doesn't inherit THZBaseEntity (it's built directly on
+    CoordinatorEntity/ClimateEntity), and was missed entirely when this
+    feature was first added -- it had no entity_id_style/entity_id_prefix
+    parameters at all, so climate entities always used HA's own
+    device/area-based naming regardless of the configured style. There's no
+    single FHEM raw parameter name for a climate entity (it's a synthesized
+    composite of several registers), so the entity's own translation_key
+    (e.g. "heating_circuit") is used as the raw name to slugify instead.
+    """
+
+    @staticmethod
+    def _make_climate_entity(entity_id_style="default", entity_id_prefix=None):
+        from custom_components.thz.climate import THZClimate
+
+        coordinator = MagicMock()
+        coordinator.data = bytes(10)
+        coordinator.async_add_listener = MagicMock(return_value=lambda: None)
+        device = _make_mock_device()
+        return THZClimate(
+            coordinator=coordinator,
+            cooling_coordinator=None,
+            device=device,
+            device_id="test_device",
+            translation_key="heating_circuit",
+            current_temp_offset=0,
+            current_temp_length=2,
+            target_temp_offset=2,
+            target_temp_length=2,
+            op_mode_offset=4,
+            op_mode_length=1,
+            heat_setpoint_entry=None,
+            cool_switch_entry=None,
+            cool_setpoint_entry=None,
+            entity_id_style=entity_id_style,
+            entity_id_prefix=entity_id_prefix,
+        )
+
+    def test_climate_default_style_leaves_entity_id_unset(self):
+        entity = self._make_climate_entity(entity_id_style="default")
+        assert entity.entity_id is None
+
+    def test_climate_fhem_style_sets_entity_id(self):
+        entity = self._make_climate_entity(entity_id_style="fhem")
+        assert entity.entity_id == "climate.heating_circuit"
+
+    def test_climate_fhem_style_with_prefix(self):
+        entity = self._make_climate_entity(entity_id_style="fhem", entity_id_prefix="lwz")
+        assert entity.entity_id == "climate.lwz_heating_circuit"
+
+
 class TestReadEntityIdStyle:
     """sensor/binary_sensor entities honour entity_id_style."""
 
