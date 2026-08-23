@@ -93,6 +93,37 @@ All notable changes to the THZ integration are documented here.
   to go through Reconfigure again to add "Fault Log" to the polled blocks before the
   new sensors appear.
 
+### Bug Fixes
+
+- **Solar circuit and live fan sensors displayed only the device name instead of
+  their own name** (e.g. every "fan"/"airflow" row in the entities list showing
+  the same device name repeated instead of "Input Fan Speed", "Fan Stage Airflow
+  Inlet", etc.): the "Solar circuit and live fan status" feature (`pxx16`/`pxxE8`,
+  above) referenced 12 `translation_key` values that were never added to
+  `strings.json` or `translations/en.json`. Since these entities have
+  `has_entity_name=True` but their translation lookup resolved to nothing, Home
+  Assistant fell back to showing just the device name for each one. Verified via a
+  full sweep of `register_maps/*.py` against `translations/en.json` that these were
+  the only 12 missing read-side keys anywhere in the codebase (the write-side
+  `entity_translations.py` mapping had no gaps). Fixed by adding all 12 keys to both
+  files.
+
+- **Button entities (`zResetLast10errors`) failed to load entirely** when a technician
+  firmware profile was selected: `async_setup_write_platform()` (used by every
+  write-based platform — number/switch/select/button) unconditionally passes
+  `entity_id_style`, `entity_visibility`, and `entity_id_prefix` to the entity
+  constructor, but `THZButton.__init__()` was missed when those parameters were added
+  to the other write platforms and never accepted them. This raised
+  `TypeError: THZButton.__init__() got an unexpected keyword argument
+  'entity_id_style'` during setup, which Home Assistant logged and silently
+  swallowed for that one platform — every other platform (sensor, number, switch,
+  select, time, binary_sensor, climate) still set up normally, but no button
+  entities were ever created. Fixed by adding the same three parameters to
+  `THZButton.__init__()`, matching `THZNumber`/`THZSwitch`/`THZSelect`. Added a
+  regression test that exercises `THZButton` through `async_setup_write_platform()`
+  itself (not just direct construction), since that's the actual code path that
+  broke and no prior test went through it.
+
 ### Correction
 
 - **"Live pump-running status for firmware 4.39/5.39" (previously listed above as a New

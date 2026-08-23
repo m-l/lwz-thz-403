@@ -130,6 +130,32 @@ class TestWriteEntityIdStyle:
         )
         assert getattr(entity, "_attr_suggested_object_id", None) is None
 
+    def test_button_fhem_style_sets_suggested_object_id(self):
+        from custom_components.thz.button import THZButton
+
+        entity = THZButton(
+            name="zResetLast10errors",
+            entry={"command": "0A0700", "type": "button", "icon": ""},
+            device=_make_mock_device(),
+            device_id="test_device",
+            entity_id_style="fhem",
+        )
+        assert entity._attr_suggested_object_id == fhem_style_object_id(
+            "zResetLast10errors"
+        )
+
+    def test_button_default_style_leaves_suggested_object_id_unset(self):
+        from custom_components.thz.button import THZButton
+
+        entity = THZButton(
+            name="zResetLast10errors",
+            entry={"command": "0A0700", "type": "button", "icon": ""},
+            device=_make_mock_device(),
+            device_id="test_device",
+            entity_id_style="default",
+        )
+        assert getattr(entity, "_attr_suggested_object_id", None) is None
+
 
 class TestReadEntityIdStyle:
     """sensor/binary_sensor entities honour entity_id_style."""
@@ -263,6 +289,57 @@ class TestPlatformSetupPassesEntityIdStyle:
         assert len(added) == 1
         assert getattr(added[0], "_attr_suggested_object_id", None) is None
 
+    @pytest.mark.asyncio
+    async def test_write_platform_creates_button_entities_without_error(self):
+        """Regression test: async_setup_write_platform always passes
+        entity_id_style/entity_visibility/entity_id_prefix to every write
+        platform's entity class, including button. THZButton.__init__ once
+        lacked these kwargs, which raised a TypeError at runtime and silently
+        killed the whole button platform (caught via live HA logs, not by
+        this test suite, since no prior test exercised button through this
+        code path)."""
+        from custom_components.thz.platform_setup import async_setup_write_platform
+        from custom_components.thz.button import THZButton
+        from custom_components.thz.const import DOMAIN
+
+        hass = MagicMock()
+        entry_id = "test_entry"
+        hass.data = {
+            DOMAIN: {
+                entry_id: {
+                    "write_manager": MagicMock(
+                        get_all_registers=MagicMock(
+                            return_value={
+                                "zResetLast10errors": {
+                                    "command": "0A0700",
+                                    "type": "button",
+                                    "icon": "",
+                                }
+                            }
+                        )
+                    ),
+                    "device": _make_mock_device(),
+                    "device_id": "test_device",
+                    "entity_id_style": "fhem",
+                    "entity_visibility": "default",
+                    "entity_id_prefix": "lwz",
+                }
+            }
+        }
+        config_entry = MagicMock()
+        config_entry.entry_id = entry_id
+        config_entry.data = {}
+
+        added = []
+        async_add_entities = MagicMock(side_effect=lambda entities, *_a, **_kw: added.extend(entities))
+
+        await async_setup_write_platform(
+            hass, config_entry, async_add_entities, THZButton, "button"
+        )
+
+        assert len(added) == 1
+        assert added[0]._attr_suggested_object_id == "lwz_z_reset_last10errors"
+
 
 class TestEntityIdPrefix:
     """entity_id_prefix (short device alias) threads through to fhem-style ids."""
@@ -302,6 +379,19 @@ class TestEntityIdPrefix:
             entity_id_prefix="lwz",
         )
         assert entity._attr_suggested_object_id == "lwz_p99start_unsched_vent"
+
+    def test_button_fhem_style_with_prefix(self):
+        from custom_components.thz.button import THZButton
+
+        entity = THZButton(
+            name="zResetLast10errors",
+            entry={"command": "0A0700", "type": "button", "icon": ""},
+            device=_make_mock_device(),
+            device_id="test_device",
+            entity_id_style="fhem",
+            entity_id_prefix="lwz",
+        )
+        assert entity._attr_suggested_object_id == "lwz_z_reset_last10errors"
 
     def test_default_style_ignores_prefix(self):
         """entity_id_prefix has no effect when entity_id_style is "default"."""
