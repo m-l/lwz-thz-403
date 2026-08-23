@@ -95,32 +95,63 @@ All notable changes to the THZ integration are documented here.
 
 ### Bug Fixes
 
+- **`entity_id_style: "fhem"` never actually worked, for any entity, on any
+  install** (the entity_id you actually got was always Home Assistant's own
+  default: device name, and often the device's assigned *area* name too,
+  glued in front of the entity name -- e.g.
+  `number.heating_clima_water_control_lwz_start_unscheduled_ventilation`
+  instead of the intended `number.lwz_p99start_unsched_vent`). Root cause,
+  found by reading Home Assistant's actual `Entity` source: **there is no
+  `_attr_suggested_object_id` attribute in Home Assistant.**
+  `Entity.suggested_object_id` is a read-only `@property` computed from
+  `self.name`/translations -- it never reads any `_attr_*` instance
+  attribute. Every entity class in this integration set
+  `self._attr_suggested_object_id = ...`, which Home Assistant simply never
+  looked at; it's a silent no-op. That's why every single entity always fell
+  straight through to HA's own `has_entity_name`/device-name/area-based
+  naming, regardless of `entity_id_style`, `alias`, registry state, or
+  anything else -- the whole feature was built around an API that doesn't
+  exist. Our own tests didn't catch it because they only asserted that our
+  code had set our own made-up attribute, never exercising Home Assistant's
+  real entity_id generation path. Fixed by setting `self.entity_id` (the
+  full `"domain.object_id"` string) directly instead, before the entity is
+  added to hass -- the mechanism `entity_platform.py` actually honors: if an
+  entity's `entity_id` is already set, HA uses it verbatim instead of
+  deriving one from name/device/area. Updated the integration test suite to
+  assert against `entity.entity_id` rather than the dead attribute, and gave
+  the test harness's mock `Entity` an `entity_id = None` class default to
+  match real HA behavior.
+
+  **If you're hitting this**: this fix only takes effect for entities Home
+  Assistant creates fresh -- since `entity_id` is only consulted the very
+  first time a registry row is created for a given `unique_id`, any entity
+  that already has a row (which, per the above, is *all* of them) keeps its
+  existing long entity_id forever unless that row is removed first. With
+  Home Assistant fully stopped, back up and edit `.storage/core.entity_registry`
+  to remove every entry with `"platform":"thz"` (or, if you'd rather keep
+  entities that already look the way you want, just the ones matching your
+  old area/device name prefix), then start Home Assistant -- the existing
+  config entry will recreate every entity fresh on startup, no need to
+  remove and re-add the integration itself.
+
 - **Entity IDs stayed permanently frozen to whatever they were the very first time this
   integration was ever set up, no matter how many times you removed and re-added it or
   changed `entity_id_style`/`alias`**: confirmed directly against a live install's
   `.storage/core.entity_registry` and `.storage/core.config_entries` (the current config
   entry correctly had `"entity_id_style":"fhem"` and `"alias":"lwz"`, yet an entity's
   registry row showed `"suggested_object_id":null` and a `created_at` timestamp from
-  well before that entry existed). Home Assistant's own config-entry deletion does not
-  reliably null out an entity's `config_entry_id` back to `None` -- it can leave it
-  pointing at the now-deleted entry's id instead. `_async_cleanup_orphaned_entities()`
-  (added specifically to purge leftover entities on startup) only ever checked for
-  `config_entry_id is None`, so it never caught this "dangling id" case: the stale
-  registry row (and its `unique_id`) silently reattached to every subsequent setup,
-  and since `suggested_object_id` is consulted by Home Assistant only the very first
-  time a row is ever created for a given `unique_id`, no later `entity_id_style` or
-  `alias` change could ever take effect on it. Fixed by also treating an entity as
-  orphaned when its `config_entry_id` doesn't correspond to any config entry that
-  currently exists (`hass.config_entries.async_get_entry() is None`), not just when
-  it's literally `None`. Added test coverage for this function, which previously had
-  none at all.
-
-  **If you're hitting this**: this fix only prevents it going forward -- entities that
-  already reattached to your current config entry won't retroactively regenerate,
-  since their row still exists and now has a valid `config_entry_id`. With Home
-  Assistant fully stopped, back up and edit `.storage/core.entity_registry` to remove
-  every entry with `"platform":"thz"`, then start Home Assistant and re-add the
-  integration for entities that are genuinely computed fresh.
+  well before that entry existed -- now understood to be expected regardless of this
+  bug, per the `_attr_suggested_object_id` fix above, but this fix independently
+  matters for the *dangling-`config_entry_id`* case it targets). Home Assistant's own
+  config-entry deletion does not reliably null out an entity's `config_entry_id` back
+  to `None` -- it can leave it pointing at the now-deleted entry's id instead.
+  `_async_cleanup_orphaned_entities()` (added specifically to purge leftover entities
+  on startup) only ever checked for `config_entry_id is None`, so it never caught this
+  "dangling id" case: the stale registry row (and its `unique_id`) silently reattached
+  to every subsequent setup. Fixed by also treating an entity as orphaned when its
+  `config_entry_id` doesn't correspond to any config entry that currently exists
+  (`hass.config_entries.async_get_entry() is None`), not just when it's literally
+  `None`. Added test coverage for this function, which previously had none at all.
 
 - **Solar circuit and live fan sensors displayed only the device name instead of
   their own name** (e.g. every "fan"/"airflow" row in the entities list showing
