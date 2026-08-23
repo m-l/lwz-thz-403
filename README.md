@@ -74,15 +74,44 @@ data:
 
 ⚠️ Only use this service if you have a manually-controlled 3-way valve and understand the risk of incorrect actuation.
 
-### Hidden Entities by Default
+### Entity Visibility Tiers
 
-To provide a cleaner initial setup experience, the following entity types are hidden by default:
+To provide a cleaner initial setup experience, some less-commonly-needed entity
+types start out disabled:
 
 - **HC2 (Heating Circuit 2) entities**: Only needed if you have a second heating circuit installed
 - **Time plan/programme entities**: Advanced schedule configuration entities (`programDHW_*`, `programHC1_*`, `programHC2_*`)
 - **Advanced technical parameters**: Parameters like gradient, hysteresis, integral components (typically p13 and higher)
 
-Hidden entities can be re-enabled via **Settings → Devices & Services → THZ → device → Show disabled entities**.
+An **Entity Visibility** option (set during initial setup, or changed anytime
+via **Reconfigure**) controls how many of these start out enabled:
+
+| Tier | Behavior |
+|------|----------|
+| `Default` | Hides HC2, schedules, and advanced parameters (the entity list above) |
+| `Extended` | Enables HC2 and advanced parameters; schedules stay hidden |
+| `All` | Enables everything, including schedules |
+
+Changing this option later via **Reconfigure** is retroactive: it bulk
+enables/disables the matching entities on your existing install, so you
+don't need to re-add the integration or click through entities one by one.
+It never touches an entity you've manually enabled or disabled yourself.
+
+Individual entities can always be re-enabled or hidden by hand via
+**Settings → Devices & Services → THZ → device → Show disabled entities**,
+regardless of the chosen tier.
+
+### Entity ID Naming Style
+
+An **Entity ID Style** option (also set during initial setup or via
+Reconfigure) controls how `entity_id`s are generated for newly created
+entities: `Default` uses this integration's own descriptive naming, while
+`FHEM/technical` derives the `entity_id` from the raw FHEM/Stiebel Eltron
+register field name instead (e.g. `dhwPump`, `p01RoomTempDayHC1`) — handy if
+you're porting dashboards or automations from FHEM. This only affects the
+`entity_id`; the displayed friendly name is unchanged either way, and it only
+applies to entities created from that point on — it does not rename entities
+that already exist.
 
 ### COP (Coefficient of Performance) Sensors
 
