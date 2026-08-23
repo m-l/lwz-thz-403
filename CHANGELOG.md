@@ -8,235 +8,171 @@ All notable changes to the THZ integration are documented here.
 
 ### New Features
 
-- **Entity visibility tiers** (`entity_visibility` config option, choosable
-  during initial setup and later via Reconfigure): replaces the previous
-  all-or-nothing behavior of hiding every HC2, schedule/program, and advanced
-  technical parameter entity behind a manual per-entity enable click. Three
-  tiers are offered: "Default" hides HC2, program/schedule entities, and
-  advanced parameters (gradients, hysteresis, booster timing, and similar) —
-  matching the integration's previous fixed behavior. "Extended" enables
-  everything except the lengthy program/schedule entries, so HC2 and the
-  advanced parameters show up without any manual clicking. "All" enables
-  literally everything, schedules included. Changing this option later via
-  Reconfigure is retroactive: it bulk enables/disables the relevant entities
-  on your existing install (not just newly created ones going forward),
-  so switching tiers doesn't require re-adding the integration. It never
-  touches an entity you've manually enabled or disabled yourself — only
-  entities this option itself previously disabled are ever re-enabled.
+- **Entity visibility tiers** (`entity_visibility` config option, set at setup or via
+  Reconfigure): replaces the old all-or-nothing hiding of HC2, schedule/program, and
+  advanced parameter entities behind manual enable clicks. Three tiers: "Default" hides
+  HC2, schedules, and advanced parameters (gradients, hysteresis, booster timing, etc.)
+  — the previous behavior. "Extended" enables everything except schedules. "All"
+  enables everything. Changing tiers via Reconfigure is retroactive — it bulk
+  enables/disables entities on your existing install, no re-add needed — and never
+  touches entities you've manually toggled; only ones this option itself disabled get
+  re-enabled.
 
-- **FHEM/technical entity_id naming style** (`entity_id_style` config option,
-  choosable during initial setup and later via Reconfigure): adds an
-  alternative to this integration's own descriptive entity_id naming.
-  Choosing "FHEM/technical" derives each entity's `entity_id` from its raw
-  internal register-map/parameter name instead — e.g. `dhwPump`,
-  `collectorTemp`, `p01RoomTempDayHC1` — which, for the large majority of
-  entities, already *is* FHEM's own 00_THZ.pm field name or Stiebel Eltron's
-  official parameter number, since this integration was ported from those
-  same tables. Intended to make dashboards and automations easier to port
-  over for FHEM users migrating to this integration. Investigated (and
-  rejected) using the shorter aliases some FHEM users see in their own
-  reading list (e.g. `PumpDHW`, `Compress`, `dhw_temp`) — those turned out to
-  not be published by the FHEM module itself at all; they come from that
-  user's own local `userReadings` configuration in fhem.cfg, so they aren't
-  a stable, universal target. This option only changes HA's
-  `suggested_object_id` for a **brand-new** entity — it never touches
-  `unique_id` or the displayed friendly name, so switching it does not
-  rename or break any entity that already exists in your setup; it only
-  applies going forward, to newly created entities.
+- **FHEM/technical entity_id naming style** (`entity_id_style` config option, set at
+  setup or via Reconfigure): an alternative to this integration's descriptive entity_id
+  naming. Choosing "FHEM/technical" derives each `entity_id` from the raw
+  register-map/parameter name instead — e.g. `dhwPump`, `collectorTemp`,
+  `p01RoomTempDayHC1` — which for most entities already matches FHEM's own `00_THZ.pm`
+  field name or Stiebel Eltron's parameter number, since this integration was ported
+  from those tables. Meant to ease dashboard/automation porting for FHEM users migrating
+  over. Rejected using the shorter aliases some FHEM users see (`PumpDHW`, `Compress`,
+  `dhw_temp`) — those aren't published by the FHEM module itself, only by that user's
+  local `userReadings` config, so they're not a stable target. This only changes HA's
+  `suggested_object_id` for a **brand-new** entity — never `unique_id` or the friendly
+  name — so switching it doesn't rename or break existing entities, only new ones.
 
-  Fixed a follow-up gap in this feature: on "Default" style, Home Assistant's
-  own `has_entity_name` fallback prepends the *full* device name/alias to
-  every translated entity's entity_id (e.g.
-  `number.heating_clima_water_control_lwz_start_unscheduled_ventilation`),
-  which the "FHEM/technical" style didn't previously account for. Added an
-  optional **alias** field (now settable during initial setup too, not just
-  via Reconfigure) that, when set, is prepended as a short prefix to the
-  FHEM-style entity_id instead — e.g. alias `lwz` + register field
-  `p99startUnschedVent` → `number.lwz_p99start_unsched_vent`. No prefix is
-  added if no alias is set.
+  Fixed a follow-up gap: on "Default" style, HA's `has_entity_name` fallback prepends
+  the *full* device name/alias to every entity_id (e.g.
+  `number.heating_clima_water_control_lwz_start_unscheduled_ventilation`), which
+  "FHEM/technical" style didn't account for. Added an optional **alias** field (now
+  settable at initial setup too) that, when set, prefixes the FHEM-style entity_id
+  instead — e.g. alias `lwz` + `p99startUnschedVent` →
+  `number.lwz_p99start_unsched_vent`. No prefix if no alias is set.
 
-- **Solar circuit and live fan status for firmware 4.39/5.39** (`pxx16` / `sSol`,
-  command `16`, and `pxxE8` / `sFan`, command `E8`): Ports two more FHEM blocks that
-  had no equivalent in this fork at all. `pxx16` adds `collector_temp`, `dhw_temp`,
-  and `flow_temp` (solar circuit temperatures), `ed_sol_pump` (solar pump runtime
-  counter), plus the raw `out`/`status` fields FHEM itself never decodes further.
-  `pxxE8` adds live `input_fan_speed`/`output_fan_speed`,
+- **Solar circuit and live fan status for firmware 4.39/5.39** (`pxx16`/`sSol`, command
+  `16`, and `pxxE8`/`sFan`, command `E8`): ports two FHEM blocks with no prior
+  equivalent in this fork. `pxx16` adds `collector_temp`, `dhw_temp`, `flow_temp` (solar
+  circuit temps), `ed_sol_pump` (solar pump runtime), plus raw `out`/`status` fields
+  FHEM never decodes further. `pxxE8` adds live `input_fan_speed`/`output_fan_speed`,
   `p_fanstage_x_airflow_inlet`/`_outlet` (m³/h), and `input_fan_power`/
   `output_fan_power` — distinct from the existing `p07`-`p12`/`p43`-`p46`/`p99`
-  fan-stage *setting* write entities, and from firmware 2.06's own differently-laid-out
-  `E8fan206` block. Found via a systematic pass comparing every read block against
-  FHEM's `00_THZ.pm`; the write side had no equivalent gaps. Like the fault log, these
-  are new register blocks: existing config entries need to go through Reconfigure again
-  to add "Solar Circuit" / "Fan Status & Air Flow" to the polled blocks before the new
-  sensors appear.
+  fan-stage *setting* entities and firmware 2.06's own `E8fan206` layout. Found via a
+  systematic pass against FHEM's `00_THZ.pm`; write side had no gaps. New register
+  blocks — existing config entries need Reconfigure to add "Solar Circuit"/"Fan Status &
+  Air Flow" to polled blocks before sensors appear.
 
-- **Firmware profile override** (`firmware_override` config option): Lets you force a
-  specific FHEM-style register-map profile regardless of what the device reports —
-  including the `"439technician"` / `"539technician"` variants, matching the technician
-  profile some users already run under FHEM. Configurable via the integration's
-  Reconfigure flow ("Firmware profile" dropdown: Auto-detect, 2.06, 2.14, 2.14j, 4.39,
-  4.39 Technician, 5.39, 5.39 Technician). The detected firmware value shown in
-  diagnostics/`firmware_version` is unaffected — the override only changes which
-  register maps get loaded. Selecting a technician profile additionally exposes
-  `zResetLast10errors` (button), and `zPumpHC` / `zPumpDHW` / `zControlValveDHW`
-  (manual pump/valve force, for testing).
+- **Firmware profile override** (`firmware_override` config option): forces a specific
+  FHEM-style register-map profile regardless of what the device reports, including
+  `"439technician"`/`"539technician"`, matching the technician profile some users run
+  under FHEM. Set via Reconfigure ("Firmware profile" dropdown: Auto-detect, 2.06, 2.14,
+  2.14j, 4.39, 4.39 Technician, 5.39, 5.39 Technician). Diagnostics/`firmware_version` is
+  unaffected — the override only changes which register maps load. A technician profile
+  also exposes `zResetLast10errors` (button) and `zPumpHC`/`zPumpDHW`/
+  `zControlValveDHW` (manual force, for testing).
 
-- **Fault log sensors for firmware 4.39 / 5.39** (`pxxD1` block, command `D1`): Adds
-  `number_of_faults` plus `fault0CODE`/`fault0TIME`/`fault0DATE` through
-  `fault3CODE`/`fault3TIME`/`fault3DATE`, decoded to human-readable fault names and
-  `HH:MM` / `DD.MM` strings. Ported from FHEM's `D1last` parsing table — like the
-  reference implementation, only the 4 most recent entries are available, not 10
-  despite the name. Firmware 4.39/5.39 encode fault codes as 1 byte (vs. 2 bytes on
-  2.06) and encode fault times/dates with their two bytes swapped relative to the
-  2.06 encoding, requiring two new decode types (`turnhex2time`, `turnhexdate`) added
-  to `value_codec.py`. This is a new register block, so existing config entries need
-  to go through Reconfigure again to add "Fault Log" to the polled blocks before the
-  new sensors appear.
+- **Fault log sensors for firmware 4.39/5.39** (`pxxD1` block, command `D1`): adds
+  `number_of_faults` plus `fault0`-`fault3` `CODE`/`TIME`/`DATE`, decoded to
+  human-readable fault names and `HH:MM`/`DD.MM` strings. Ported from FHEM's `D1last`
+  table — like the reference, only 4 recent entries are available, not 10 despite the
+  name. 4.39/5.39 encode fault codes as 1 byte (vs. 2 on 2.06) with swapped time/date
+  byte order, requiring two new decode types (`turnhex2time`, `turnhexdate`) in
+  `value_codec.py`. New register block — existing entries need Reconfigure to add
+  "Fault Log" to polled blocks before sensors appear.
 
 ### Bug Fixes
 
-- **`entity_id_style: "fhem"` never actually worked, for any entity, on any
-  install** (the entity_id you actually got was always Home Assistant's own
-  default: device name, and often the device's assigned *area* name too,
-  glued in front of the entity name -- e.g.
-  `number.heating_clima_water_control_lwz_start_unscheduled_ventilation`
-  instead of the intended `number.lwz_p99start_unsched_vent`). Root cause,
-  found by reading Home Assistant's actual `Entity` source: **there is no
-  `_attr_suggested_object_id` attribute in Home Assistant.**
-  `Entity.suggested_object_id` is a read-only `@property` computed from
-  `self.name`/translations -- it never reads any `_attr_*` instance
-  attribute. Every entity class in this integration set
-  `self._attr_suggested_object_id = ...`, which Home Assistant simply never
-  looked at; it's a silent no-op. That's why every single entity always fell
-  straight through to HA's own `has_entity_name`/device-name/area-based
-  naming, regardless of `entity_id_style`, `alias`, registry state, or
-  anything else -- the whole feature was built around an API that doesn't
-  exist. Our own tests didn't catch it because they only asserted that our
-  code had set our own made-up attribute, never exercising Home Assistant's
-  real entity_id generation path. Fixed by setting `self.entity_id` (the
-  full `"domain.object_id"` string) directly instead, before the entity is
-  added to hass -- the mechanism `entity_platform.py` actually honors: if an
-  entity's `entity_id` is already set, HA uses it verbatim instead of
-  deriving one from name/device/area. Updated the integration test suite to
-  assert against `entity.entity_id` rather than the dead attribute, and gave
-  the test harness's mock `Entity` an `entity_id = None` class default to
-  match real HA behavior.
+- **`entity_id_style: "fhem"` never actually worked, for any entity, on any install**
+  (you always got HA's default naming — device name and often area name glued on, e.g.
+  `number.heating_clima_water_control_lwz_start_unscheduled_ventilation` instead of
+  `number.lwz_p99start_unsched_vent`). Root cause: **`_attr_suggested_object_id` isn't a
+  real Home Assistant attribute.** `Entity.suggested_object_id` is a read-only
+  `@property` computed from `self.name`/translations — it never reads any `_attr_*`
+  attribute. Every entity class here set `self._attr_suggested_object_id = ...`, a
+  silent no-op HA never looked at, so every entity fell through to HA's
+  `has_entity_name`/device/area naming regardless of `entity_id_style` or `alias` — the
+  whole feature was built on an API that doesn't exist. Our tests missed it because they
+  only checked our own made-up attribute, never HA's real entity_id path. Fixed by
+  setting `self.entity_id` (the full `"domain.object_id"` string) directly before the
+  entity is added to hass — the mechanism `entity_platform.py` actually honors. Updated
+  tests to assert `entity.entity_id`, and gave the mock `Entity` an `entity_id = None`
+  default to match real HA.
 
-  **If you're hitting this**: this fix only takes effect for entities Home
-  Assistant creates fresh -- since `entity_id` is only consulted the very
-  first time a registry row is created for a given `unique_id`, any entity
-  that already has a row (which, per the above, is *all* of them) keeps its
-  existing long entity_id forever unless that row is removed first. With
-  Home Assistant fully stopped, back up and edit `.storage/core.entity_registry`
-  to remove every entry with `"platform":"thz"` (or, if you'd rather keep
-  entities that already look the way you want, just the ones matching your
-  old area/device name prefix), then start Home Assistant -- the existing
-  config entry will recreate every entity fresh on startup, no need to
-  remove and re-add the integration itself.
+  **If you're hitting this**: the fix only applies to entities HA creates fresh —
+  `entity_id` is only consulted the first time a registry row exists for a given
+  `unique_id`, so any entity with an existing row (all of them) keeps its long
+  entity_id until that row is removed. With HA fully stopped, back up and edit
+  `.storage/core.entity_registry` to remove entries with `"platform":"thz"` (or just
+  ones matching your old name prefix), then start HA — the existing config entry
+  recreates every entity fresh, no re-add needed.
 
-- **Entity IDs stayed permanently frozen to whatever they were the very first time this
-  integration was ever set up, no matter how many times you removed and re-added it or
-  changed `entity_id_style`/`alias`**: confirmed directly against a live install's
-  `.storage/core.entity_registry` and `.storage/core.config_entries` (the current config
-  entry correctly had `"entity_id_style":"fhem"` and `"alias":"lwz"`, yet an entity's
-  registry row showed `"suggested_object_id":null` and a `created_at` timestamp from
-  well before that entry existed -- now understood to be expected regardless of this
-  bug, per the `_attr_suggested_object_id` fix above, but this fix independently
-  matters for the *dangling-`config_entry_id`* case it targets). Home Assistant's own
-  config-entry deletion does not reliably null out an entity's `config_entry_id` back
-  to `None` -- it can leave it pointing at the now-deleted entry's id instead.
-  `_async_cleanup_orphaned_entities()` (added specifically to purge leftover entities
-  on startup) only ever checked for `config_entry_id is None`, so it never caught this
-  "dangling id" case: the stale registry row (and its `unique_id`) silently reattached
-  to every subsequent setup. Fixed by also treating an entity as orphaned when its
-  `config_entry_id` doesn't correspond to any config entry that currently exists
-  (`hass.config_entries.async_get_entry() is None`), not just when it's literally
-  `None`. Added test coverage for this function, which previously had none at all.
+- **Entity IDs stayed permanently frozen from first setup, no matter how many times you
+  removed/re-added the integration or changed `entity_id_style`/`alias`**: confirmed
+  against a live install's `.storage/core.entity_registry`/`core.config_entries` (a
+  current entry correctly had `"entity_id_style":"fhem"` and `"alias":"lwz"`, yet a row
+  showed `"suggested_object_id":null` with a `created_at` predating that entry —
+  expected per the `_attr_suggested_object_id` fix above, but this fix targets the
+  separate *dangling-`config_entry_id`* case). HA's config-entry deletion doesn't
+  reliably null an entity's `config_entry_id` — it can leave it pointing at the deleted
+  entry's id. `_async_cleanup_orphaned_entities()` only checked for
+  `config_entry_id is None`, missing this case, so stale rows silently reattached on
+  every setup. Fixed by also treating an entity as orphaned when its `config_entry_id`
+  matches no existing entry. Added test coverage, previously nonexistent.
 
-- **Solar circuit and live fan sensors displayed only the device name instead of
-  their own name** (e.g. every "fan"/"airflow" row in the entities list showing
-  the same device name repeated instead of "Input Fan Speed", "Fan Stage Airflow
-  Inlet", etc.): the "Solar circuit and live fan status" feature (`pxx16`/`pxxE8`,
-  above) referenced 12 `translation_key` values that were never added to
-  `strings.json` or `translations/en.json`. Since these entities have
-  `has_entity_name=True` but their translation lookup resolved to nothing, Home
-  Assistant fell back to showing just the device name for each one. Verified via a
-  full sweep of `register_maps/*.py` against `translations/en.json` that these were
-  the only 12 missing read-side keys anywhere in the codebase (the write-side
-  `entity_translations.py` mapping had no gaps). Fixed by adding all 12 keys to both
-  files.
+- **Solar circuit and live fan sensors displayed only the device name** (every
+  "fan"/"airflow" row repeating the device name instead of "Input Fan Speed", etc.): the
+  solar/fan-status feature (`pxx16`/`pxxE8`, above) referenced 12 `translation_key`
+  values never added to `strings.json`/`translations/en.json`. With
+  `has_entity_name=True` and no translation match, HA fell back to the device name. A
+  full sweep of `register_maps/*.py` against `translations/en.json` confirmed these were
+  the only 12 missing read-side keys (write-side `entity_translations.py` had none).
+  Fixed by adding all 12.
 
-- **Button entities (`zResetLast10errors`) failed to load entirely** when a technician
-  firmware profile was selected: `async_setup_write_platform()` (used by every
-  write-based platform — number/switch/select/button) unconditionally passes
-  `entity_id_style`, `entity_visibility`, and `entity_id_prefix` to the entity
-  constructor, but `THZButton.__init__()` was missed when those parameters were added
-  to the other write platforms and never accepted them. This raised
-  `TypeError: THZButton.__init__() got an unexpected keyword argument
-  'entity_id_style'` during setup, which Home Assistant logged and silently
-  swallowed for that one platform — every other platform (sensor, number, switch,
-  select, time, binary_sensor, climate) still set up normally, but no button
-  entities were ever created. Fixed by adding the same three parameters to
-  `THZButton.__init__()`, matching `THZNumber`/`THZSwitch`/`THZSelect`. Added a
-  regression test that exercises `THZButton` through `async_setup_write_platform()`
-  itself (not just direct construction), since that's the actual code path that
-  broke and no prior test went through it.
+- **Button entities (`zResetLast10errors`) failed to load** when a technician firmware
+  profile was selected: `async_setup_write_platform()` (shared by every write platform)
+  unconditionally passes `entity_id_style`, `entity_visibility`, and `entity_id_prefix`
+  to the constructor, but `THZButton.__init__()` was missed when those params were added
+  elsewhere and never accepted them. This raised `TypeError: THZButton.__init__() got an
+  unexpected keyword argument 'entity_id_style'`, which HA logged and silently swallowed
+  for that platform — every other platform set up fine, but no buttons were ever
+  created. Fixed by adding the same three params to `THZButton.__init__()`, matching the
+  other write entities. Added a regression test through `async_setup_write_platform()`
+  itself, since that's the path that broke and nothing previously exercised it.
 
 ### Correction
 
-- **"Live pump-running status for firmware 4.39/5.39" (previously listed above as a New
-  Feature) was a false alarm and has been removed.** A user report of the `zPumpHC`/
-  `zPumpDHW` technician "force" selects showing `unknown` was correctly diagnosed as
-  expected (those are one-shot write-only commands with no readable state, matching
-  FHEM's own model), but the follow-up assumption — that 4.39/5.39 lacked read-only
-  `dhw_pump`/`heating_circuit_pump`/`solar_pump` status entirely — was wrong. A later,
-  broader audit against FHEM's `00_THZ.pm` found that `register_map_all.py` (a universal
-  base register map already merged in for every firmware family) has defined identical
-  `pxxFB` entries for all three pumps at the same offsets all along. The sensors were
-  already there; the "fix" duplicated existing entries with no behavioural difference.
-  The duplicate block has been removed from `readings_map_439.py` again. If you added
-  these to your polled blocks via Reconfigure, no action is needed — the entities keep
-  working exactly the same, now sourced from the pre-existing base map instead of the
-  short-lived duplicate.
+- **"Live pump-running status for firmware 4.39/5.39" (previously a New Feature above)
+  was a false alarm and has been removed.** A user report of `zPumpHC`/`zPumpDHW`
+  technician "force" selects showing `unknown` was correctly diagnosed as expected
+  (one-shot write-only commands, no readable state, matching FHEM), but the follow-up
+  assumption — that 4.39/5.39 lacked read-only `dhw_pump`/`heating_circuit_pump`/
+  `solar_pump` status — was wrong. A broader audit against FHEM's `00_THZ.pm` found
+  `register_map_all.py` (already merged for every firmware) had identical `pxxFB`
+  entries for all three pumps all along. The sensors already existed; the "fix" just
+  duplicated them. Removed the duplicate from `readings_map_439.py`. If you added these
+  via Reconfigure, no action needed — entities keep working, now sourced from the
+  pre-existing base map.
 
 ### Investigated, not fixed
 
-- **`solarPump` (firmware 2.06), `boosterStage3` (firmware 2.14), and
-  `evuRelease`/`STB` (firmware 2.06 and 2.14) show a raw hex value instead of
-  on/off.** Checked against FHEM's own `00_THZ.pm` source: these are marked
-  `"n.a."` in FHEM's own `FBglob206`/`FBglob214` tables too — the relevant
-  byte was repurposed for other data on these firmware revisions and no bit
-  position has ever been reverse-engineered for these fields, in FHEM or
-  here. There is no correct value to substitute without new hardware
-  capture data, so these are left as-is (matching upstream) rather than
-  guessing a bit number. Added comments at each of these four register-map
-  entries noting this so a future contributor doesn't mistake it for an
-  easy fix.
+- **`solarPump` (2.06), `boosterStage3` (2.14), and `evuRelease`/`STB` (2.06, 2.14) show
+  a raw hex value instead of on/off.** Checked against FHEM's `00_THZ.pm`: these are
+  marked `"n.a."` in FHEM's own `FBglob206`/`FBglob214` tables too — the byte was
+  repurposed on these firmware revisions and no bit position has ever been
+  reverse-engineered, in FHEM or here. No correct value exists without new hardware
+  capture data, so these stay as-is. Added comments at each of the four entries so a
+  future contributor doesn't mistake it for an easy fix.
 
 ### Bug Fixes
 
 - **Firmware "438" (and other off-point-release 4.3x builds) incorrectly used 5.39-style
-  register maps**: Any firmware string not explicitly listed in `FIRMWARE_MAPS`
-  (`register_map_manager.py`) fell through to a `"default"` entry that was really just
-  the 5.39 configuration, pulling in register offsets/fields that don't exist on 4.3x
-  hardware and causing garbage or wrong readings. `"539"` now has its own explicit entry,
-  and unrecognized firmware strings fall back to the 4.39-style maps instead — matching
-  FHEM's own `00_THZ.pm` fallback behavior ("in all other cases I assume firmware
-  4.39"). Affects, for example, LWZ 403 units reporting firmware `"438"`.
+  register maps**: any firmware string not listed in `FIRMWARE_MAPS`
+  (`register_map_manager.py`) fell through to a `"default"` entry that was really the
+  5.39 config, pulling in offsets/fields that don't exist on 4.3x hardware. `"539"` now
+  has its own entry, and unrecognized strings fall back to 4.39-style maps — matching
+  FHEM's own fallback ("in all other cases I assume firmware 4.39"). Affects, e.g., LWZ
+  403 units reporting `"438"`.
 
 - **`THZRegisterNotSupportedError` silently downgraded to a generic decode failure,
-  crashing config entry setup**: When a device cleanly reports "register not supported"
-  (a `01 04` response) for a register that genuinely doesn't exist on its firmware (e.g.
-  the 5.39-only `pxx0A033B` "Flow Rate" register on 4.3x hardware), `decode_response()`
-  deliberately raised `THZRegisterNotSupportedError` — but its own blanket
-  `except Exception` caught that same exception a few lines later and downgraded it to a
-  plain `None`, indistinguishable from a real communication failure. That surfaced as
-  "Failed setup, will retry: Error reading `<block>`: Failed to decode device response"
-  and aborted the whole config entry instead of just skipping the one unsupported block
-  (the existing `unsupported_blocks` handling in `async_setup_entry` was already written
-  for exactly this case, but never got the chance to run). Fixed by letting
-  `THZRegisterNotSupportedError` propagate cleanly out of `decode_response()`, and by
-  having `_async_update_block()` catch it and return `None` for that block instead of
+  crashing config entry setup**: when a device cleanly reports "register not supported"
+  (`01 04`) for a register that doesn't exist on its firmware (e.g. the 5.39-only
+  `pxx0A033B` "Flow Rate" on 4.3x hardware), `decode_response()` raised
+  `THZRegisterNotSupportedError` — but its own blanket `except Exception` caught it
+  again and downgraded it to `None`, indistinguishable from a real failure. That
+  surfaced as "Failed setup, will retry: ... Failed to decode device response" and
+  aborted the whole entry instead of skipping just the unsupported block (existing
+  `unsupported_blocks` handling in `async_setup_entry` never got the chance to run).
+  Fixed by letting the error propagate out of `decode_response()`, with
+  `_async_update_block()` catching it and returning `None` for that block instead of
   raising `UpdateFailed`.
 
 ---
