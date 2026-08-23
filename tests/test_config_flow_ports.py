@@ -312,3 +312,141 @@ class TestListSerialPorts:
         assert result["/dev/ttyUSB0"] == "/dev/ttyUSB0"
 
 
+class TestEntityIdStyleOption:
+    """Tests for the entity_id_style config-flow option (FHEM-style entity_id)."""
+
+    def test_init_defaults_to_default_style(self):
+        from custom_components.thz.const import ENTITY_ID_STYLE_DEFAULT
+
+        flow = THZConfigFlow()
+        assert flow.entity_id_style == ENTITY_ID_STYLE_DEFAULT
+
+    def test_async_step_user_schema_includes_entity_id_style(self):
+        """The very first setup step's schema offers the entity_id_style field.
+
+        NOTE: voluptuous is globally mocked in conftest.py for this whole test
+        suite (vol.Schema(...) returns a fresh MagicMock regardless of the
+        dict passed in), so we can't inspect the resulting vol.Schema object
+        itself. Instead we inspect the mocked vol.Optional/vol.Required
+        constructor's call args -- config_flow.py always calls
+        vol.Optional(CONF_ENTITY_ID_STYLE, ...) to add this field, so its
+        presence there is a reliable signal the field was actually added to
+        schema_dict.
+        """
+        import asyncio
+        import voluptuous as vol
+        from custom_components.thz.const import CONF_ENTITY_ID_STYLE
+
+        vol.Optional.reset_mock()
+        flow = THZConfigFlow()
+        flow.async_show_form = MagicMock(side_effect=lambda **kw: kw)
+        asyncio.run(flow.async_step_user(None))
+
+        assert any(
+            call.args and call.args[0] == CONF_ENTITY_ID_STYLE
+            for call in vol.Optional.call_args_list
+        )
+
+    def test_async_step_user_captures_entity_id_style_and_routes_to_usb(self):
+        import asyncio
+        from custom_components.thz.const import CONNECTION_USB
+
+        flow = THZConfigFlow()
+
+        async def fake_setup_usb():
+            return "usb_step"
+
+        flow.async_step_setup_usb = fake_setup_usb
+
+        result = asyncio.run(
+            flow.async_step_user(
+                {"connection_type": CONNECTION_USB, "entity_id_style": "fhem"}
+            )
+        )
+        assert flow.entity_id_style == "fhem"
+        assert result == "usb_step"
+
+    def test_async_step_user_defaults_entity_id_style_when_omitted(self):
+        """If the form is somehow submitted without the field, fall back safely."""
+        import asyncio
+        from custom_components.thz.const import CONNECTION_USB, ENTITY_ID_STYLE_DEFAULT
+
+        flow = THZConfigFlow()
+
+        async def fake_setup_usb():
+            return "usb_step"
+
+        flow.async_step_setup_usb = fake_setup_usb
+
+        asyncio.run(flow.async_step_user({"connection_type": CONNECTION_USB}))
+        assert flow.entity_id_style == ENTITY_ID_STYLE_DEFAULT
+
+    def test_reconfigure_schema_includes_entity_id_style(self):
+        """reconfigure_schema() exposes the same option for later changes.
+
+        See the note on test_async_step_user_schema_includes_entity_id_style
+        for why this inspects the mocked vol.Optional constructor's call args
+        rather than the (also mocked) resulting vol.Schema object.
+        """
+        import asyncio
+        import voluptuous as vol
+        from custom_components.thz.const import (
+            CONF_CONNECTION_TYPE,
+            CONF_ENTITY_ID_STYLE,
+            CONNECTION_IP,
+        )
+
+        flow = THZConfigFlow()
+        flow.hass = MagicMock()
+
+        fake_area_registry = MagicMock()
+        fake_area_registry.async_list_areas.return_value = []
+
+        vol.Optional.reset_mock()
+        with patch(
+            "custom_components.thz.config_flow.ar.async_get",
+            return_value=fake_area_registry,
+        ):
+            asyncio.run(flow.reconfigure_schema({CONF_CONNECTION_TYPE: CONNECTION_IP}))
+
+        assert any(
+            call.args and call.args[0] == CONF_ENTITY_ID_STYLE
+            for call in vol.Optional.call_args_list
+        )
+
+    def test_reconfigure_schema_preserves_existing_entity_id_style_default(self):
+        """A stored 'fhem' choice is prefilled as the form's default, not reset."""
+        import asyncio
+        import voluptuous as vol
+        from custom_components.thz.const import (
+            CONF_CONNECTION_TYPE,
+            CONF_ENTITY_ID_STYLE,
+            CONNECTION_IP,
+        )
+
+        flow = THZConfigFlow()
+        flow.hass = MagicMock()
+
+        fake_area_registry = MagicMock()
+        fake_area_registry.async_list_areas.return_value = []
+
+        vol.Optional.reset_mock()
+        with patch(
+            "custom_components.thz.config_flow.ar.async_get",
+            return_value=fake_area_registry,
+        ):
+            asyncio.run(
+                flow.reconfigure_schema(
+                    {CONF_CONNECTION_TYPE: CONNECTION_IP, CONF_ENTITY_ID_STYLE: "fhem"}
+                )
+            )
+
+        matching_calls = [
+            call
+            for call in vol.Optional.call_args_list
+            if call.args and call.args[0] == CONF_ENTITY_ID_STYLE
+        ]
+        assert matching_calls, "vol.Optional was never called for entity_id_style"
+        assert matching_calls[-1].kwargs.get("default") == "fhem"
+
+

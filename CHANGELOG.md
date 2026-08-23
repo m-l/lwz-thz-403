@@ -8,6 +8,26 @@ All notable changes to the THZ integration are documented here.
 
 ### New Features
 
+- **FHEM/technical entity_id naming style** (`entity_id_style` config option,
+  choosable during initial setup and later via Reconfigure): adds an
+  alternative to this integration's own descriptive entity_id naming.
+  Choosing "FHEM/technical" derives each entity's `entity_id` from its raw
+  internal register-map/parameter name instead — e.g. `dhwPump`,
+  `collectorTemp`, `p01RoomTempDayHC1` — which, for the large majority of
+  entities, already *is* FHEM's own 00_THZ.pm field name or Stiebel Eltron's
+  official parameter number, since this integration was ported from those
+  same tables. Intended to make dashboards and automations easier to port
+  over for FHEM users migrating to this integration. Investigated (and
+  rejected) using the shorter aliases some FHEM users see in their own
+  reading list (e.g. `PumpDHW`, `Compress`, `dhw_temp`) — those turned out to
+  not be published by the FHEM module itself at all; they come from that
+  user's own local `userReadings` configuration in fhem.cfg, so they aren't
+  a stable, universal target. This option only changes HA's
+  `suggested_object_id` for a **brand-new** entity — it never touches
+  `unique_id` or the displayed friendly name, so switching it does not
+  rename or break any entity that already exists in your setup; it only
+  applies going forward, to newly created entities.
+
 - **Solar circuit and live fan status for firmware 4.39/5.39** (`pxx16` / `sSol`,
   command `16`, and `pxxE8` / `sFan`, command `E8`): Ports two more FHEM blocks that
   had no equivalent in this fork at all. `pxx16` adds `collector_temp`, `dhw_temp`,
@@ -62,6 +82,20 @@ All notable changes to the THZ integration are documented here.
   these to your polled blocks via Reconfigure, no action is needed — the entities keep
   working exactly the same, now sourced from the pre-existing base map instead of the
   short-lived duplicate.
+
+### Investigated, not fixed
+
+- **`solarPump` (firmware 2.06), `boosterStage3` (firmware 2.14), and
+  `evuRelease`/`STB` (firmware 2.06 and 2.14) show a raw hex value instead of
+  on/off.** Checked against FHEM's own `00_THZ.pm` source: these are marked
+  `"n.a."` in FHEM's own `FBglob206`/`FBglob214` tables too — the relevant
+  byte was repurposed for other data on these firmware revisions and no bit
+  position has ever been reverse-engineered for these fields, in FHEM or
+  here. There is no correct value to substitute without new hardware
+  capture data, so these are left as-is (matching upstream) rather than
+  guessing a bit number. Added comments at each of these four register-map
+  entries noting this so a future contributor doesn't mistake it for an
+  easy fix.
 
 ### Bug Fixes
 

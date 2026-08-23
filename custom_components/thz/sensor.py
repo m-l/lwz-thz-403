@@ -30,8 +30,9 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, should_hide_entity_by_default
+from .const import DOMAIN, ENTITY_ID_STYLE_DEFAULT, should_hide_entity_by_default
 from .cop_sensor import async_setup_cop_sensors
+from .entity_id_style import resolve_suggested_object_id
 from .register_maps.register_map_manager import RegisterMapManager
 from .value_codec import decode_raw_value
 
@@ -63,6 +64,7 @@ async def async_setup_entry(
     coordinators = entry_data["coordinators"]
     device_id = entry_data["device_id"]
     unsupported_blocks: set[str] = entry_data.get("unsupported_blocks", set())
+    entity_id_style = entry_data.get("entity_id_style", ENTITY_ID_STYLE_DEFAULT)
 
     # Create sensors
     sensors = []
@@ -143,7 +145,11 @@ async def async_setup_entry(
             }
             sensors.append(
                 THZGenericSensor(
-                    coordinator, entry=entry, block=block_bytes, device_id=device_id
+                    coordinator,
+                    entry=entry,
+                    block=block_bytes,
+                    device_id=device_id,
+                    entity_id_style=entity_id_style,
                 )
             )
     async_add_entities(sensors, True)
@@ -250,7 +256,9 @@ class THZGenericSensor(CoordinatorEntity, SensorEntity):
         no translation is available.
     """
 
-    def __init__(self, coordinator, entry, block, device_id) -> None:
+    def __init__(
+        self, coordinator, entry, block, device_id, entity_id_style=ENTITY_ID_STYLE_DEFAULT
+    ) -> None:
         """Initialize a sensor instance with the provided configuration.
 
         Args:
@@ -258,6 +266,7 @@ class THZGenericSensor(CoordinatorEntity, SensorEntity):
             entry: The configuration entry dict for the sensor.
             block: The block associated with the sensor.
             device_id: The unique device identifier.
+            entity_id_style: "default" or "fhem" (see entity_id_style.py).
 
         Note:
             When translation_key is available, only _attr_translation_key is set.
@@ -298,6 +307,13 @@ class THZGenericSensor(CoordinatorEntity, SensorEntity):
         self._attr_entity_registry_enabled_default = (
             not should_hide_entity_by_default(self._entity_name)
         )
+
+        # Entity-ID naming style: independent of translation_key/unique_id.
+        suggested_object_id = resolve_suggested_object_id(
+            self._entity_name, entity_id_style
+        )
+        if suggested_object_id:
+            self._attr_suggested_object_id = suggested_object_id
 
     @property
     def native_value(self) -> StateType | int | float | bool | str | None:

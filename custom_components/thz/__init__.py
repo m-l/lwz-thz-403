@@ -20,9 +20,11 @@ import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    CONF_ENTITY_ID_STYLE,
     CONF_FIRMWARE_OVERRIDE,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
+    ENTITY_ID_STYLE_DEFAULT,
     FIRMWARE_OVERRIDE_AUTO,
     WRITE_REGISTER_LENGTH,
     WRITE_REGISTER_OFFSET,
@@ -54,6 +56,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
     data = config_entry.data
     conn_type = data["connection_type"]
     firmware_override = data.get(CONF_FIRMWARE_OVERRIDE, FIRMWARE_OVERRIDE_AUTO)
+    entity_id_style = data.get(CONF_ENTITY_ID_STYLE, ENTITY_ID_STYLE_DEFAULT)
 
     # 1. Initialize device
     if conn_type == "ip":
@@ -182,6 +185,7 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
         "register_manager": register_manager,
         "coordinators": coordinators,
         "unsupported_blocks": unsupported_blocks,
+        "entity_id_style": entity_id_style,
     }
 
     # Forward setup to platforms

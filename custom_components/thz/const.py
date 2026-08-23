@@ -53,6 +53,28 @@ FIRMWARE_PROFILE_LABELS: dict[str, str] = {
     "539technician": "5.39 Technician",
 }
 
+# Entity ID naming style (config-flow "entity_id_style" field).
+# "default" keeps this integration's own descriptive entity_id slugs
+# (unchanged behaviour). "fhem" instead derives the entity_id from the RAW
+# internal register-map/parameter name -- which, for the large majority of
+# entries, IS already FHEM's own 00_THZ.pm field name or Stiebel Eltron's
+# official parameter number (e.g. "dhwPump", "collectorTemp",
+# "p01RoomTempDayHC1") since this integration was ported from those same
+# tables -- run through a simple camelCase->snake_case slug (see
+# entity_id_style.py). This is purely cosmetic: it only ever changes HA's
+# *suggested* entity_id for a BRAND NEW entity (via _attr_suggested_object_id)
+# and never touches unique_id or the displayed friendly name, so switching it
+# does not rename or break any entity that already exists in the registry.
+# Intended to make dashboards/automations ported from FHEM easier to read
+# for FHEM users migrating to this integration.
+CONF_ENTITY_ID_STYLE = "entity_id_style"
+ENTITY_ID_STYLE_DEFAULT = "default"
+ENTITY_ID_STYLE_FHEM = "fhem"
+ENTITY_ID_STYLE_LABELS: dict[str, str] = {
+    ENTITY_ID_STYLE_DEFAULT: "Default (descriptive)",
+    ENTITY_ID_STYLE_FHEM: "FHEM/technical (matches 00_THZ.pm field names & Stiebel parameter numbers)",
+}
+
 # Write register offsets and lengths
 # These values are used when reading/writing individual parameters
 WRITE_REGISTER_OFFSET = 4  # Byte offset in response for parameter value

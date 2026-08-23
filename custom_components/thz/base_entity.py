@@ -14,7 +14,13 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.event import async_track_time_interval
 
-from .const import DEFAULT_UPDATE_INTERVAL, DOMAIN, should_hide_entity_by_default
+from .const import (
+    DEFAULT_UPDATE_INTERVAL,
+    DOMAIN,
+    ENTITY_ID_STYLE_DEFAULT,
+    should_hide_entity_by_default,
+)
+from .entity_id_style import resolve_suggested_object_id
 
 if TYPE_CHECKING:
     from .thz_device import THZDevice
@@ -41,6 +47,7 @@ class THZBaseEntity(Entity):
         unique_id: str | None = None,
         scan_interval: int | None = None,
         translation_key: str | None = None,
+        entity_id_style: str = ENTITY_ID_STYLE_DEFAULT,
     ) -> None:
         """Initialize base THZ entity.
 
@@ -54,6 +61,11 @@ class THZBaseEntity(Entity):
             scan_interval: Update interval in seconds (uses DEFAULT_UPDATE_INTERVAL if
                 not provided).
             translation_key: Optional translation key for localization.
+            entity_id_style: One of the ``ENTITY_ID_STYLE_*`` values from
+                const.py. "fhem" sets ``_attr_suggested_object_id`` from the
+                raw ``name`` so a brand-new entity's entity_id reads like the
+                FHEM/Stiebel field name; the displayed name and unique_id are
+                unaffected either way. See entity_id_style.py.
         """
         self._command = command
         self._device = device
@@ -80,6 +92,13 @@ class THZBaseEntity(Entity):
         self._attr_unique_id = (
             unique_id or self._generate_unique_id(command, name)
         )
+
+        # Entity-ID naming style: independent of unique_id/translation_key
+        # (see resolve_suggested_object_id's docstring for details). Only
+        # takes effect the first time HA creates this entity.
+        suggested_object_id = resolve_suggested_object_id(name, entity_id_style)
+        if suggested_object_id:
+            self._attr_suggested_object_id = suggested_object_id
 
         # Debug log entity attributes
         _LOGGER.debug(

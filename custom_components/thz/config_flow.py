@@ -16,6 +16,7 @@ from homeassistant.helpers import area_registry as ar
 
 from .const import (
     CONF_CONNECTION_TYPE,
+    CONF_ENTITY_ID_STYLE,
     CONF_FIRMWARE_OVERRIDE,
     CONNECTION_IP,
     CONNECTION_USB,
@@ -24,6 +25,8 @@ from .const import (
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_WRITE_INTERVAL,
     DOMAIN,
+    ENTITY_ID_STYLE_DEFAULT,
+    ENTITY_ID_STYLE_LABELS,
     FIRMWARE_OVERRIDE_AUTO,
     FIRMWARE_PROFILE_LABELS,
 )
@@ -48,10 +51,14 @@ class THZConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize the config flow."""
         self.connection_data = {}
         self.blocks = []
+        self.entity_id_style = ENTITY_ID_STYLE_DEFAULT
 
     async def async_step_user(self, user_input=None) -> config_entries.ConfigFlowResult:
-        """First step, select connection type."""
+        """First step, select connection type and entity naming style."""
         if user_input is not None:
+            self.entity_id_style = user_input.get(
+                CONF_ENTITY_ID_STYLE, ENTITY_ID_STYLE_DEFAULT
+            )
             if user_input["connection_type"] == CONNECTION_IP:
                 return await self.async_step_setup_ip()
             return await self.async_step_setup_usb()
@@ -64,6 +71,13 @@ class THZConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONNECTION_USB: "USB / Serial",
                     }
                 ),
+                # Entity ID naming style, asked up front since it applies to
+                # every entity created during this setup. "fhem" only
+                # changes entity_id (via suggested_object_id) for newly
+                # created entities -- it never touches the displayed name.
+                vol.Optional(
+                    CONF_ENTITY_ID_STYLE, default=ENTITY_ID_STYLE_DEFAULT
+                ): vol.In(ENTITY_ID_STYLE_LABELS),
             }
         )
         return self.async_show_form(step_id="user", data_schema=schema)
@@ -257,6 +271,17 @@ class THZConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_FIRMWARE_OVERRIDE,
             default=defaults.get(CONF_FIRMWARE_OVERRIDE, FIRMWARE_OVERRIDE_AUTO),
         )] = vol.In(FIRMWARE_PROFILE_LABELS)
+
+        # Entity ID naming style: purely cosmetic, does not affect device
+        # communication. "fhem" only changes HA's suggested_object_id for a
+        # BRAND NEW entity -- it has no effect on entities that already
+        # exist in the registry (their entity_id stays whatever it already
+        # is). Only newly-added blocks/entities, or ones removed and
+        # recreated, pick up the new style after switching this here.
+        schema_dict[vol.Optional(
+            CONF_ENTITY_ID_STYLE,
+            default=defaults.get(CONF_ENTITY_ID_STYLE, ENTITY_ID_STYLE_DEFAULT),
+        )] = vol.In(ENTITY_ID_STYLE_LABELS)
 
         # Refresh intervals for each block
         refresh_intervals = defaults.get("refresh_intervals", {})
@@ -499,6 +524,9 @@ class THZConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "refresh_intervals": refresh_intervals,
                 "write_interval": write_interval,
                 CONF_FIRMWARE_OVERRIDE: firmware_override,
+                CONF_ENTITY_ID_STYLE: getattr(
+                    self, "entity_id_style", ENTITY_ID_STYLE_DEFAULT
+                ),
             }
             conn_target = data.get("host") or data.get("device")
             title = f"THZ ({data['connection_type']}: {conn_target})"
