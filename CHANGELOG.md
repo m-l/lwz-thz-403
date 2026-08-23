@@ -8,18 +8,20 @@ All notable changes to the THZ integration are documented here.
 
 ### New Features
 
-- **Live pump-running status for firmware 4.39/5.39** (`pxxFB` block, command `FB`):
-  Adds `dhw_pump`, `heating_circuit_pump`, and `solar_pump` binary sensors reporting
-  whether each pump is actually running right now. Firmware 2.06/2.14 already exposed
-  these; 4.39/5.39 never had them wired up, even though the device already responds to
-  the `FB` command (it's read internally for the COP calculation) and the bit offsets
-  are documented in FHEM's `FBglob` table. Surfaced by a user report of the
-  `zPumpHC`/`zPumpDHW` technician "force" selects showing `unknown` — those are
-  one-shot write-only commands with no readable state by design (matching FHEM, which
-  defines no GET counterpart for them either); this adds the genuine read-only status
-  the user was actually looking for. Like the fault log, this is a new register block:
-  existing config entries need to go through Reconfigure again to add "Temperatures &
-  Status" to the polled blocks before the new sensors appear.
+- **Solar circuit and live fan status for firmware 4.39/5.39** (`pxx16` / `sSol`,
+  command `16`, and `pxxE8` / `sFan`, command `E8`): Ports two more FHEM blocks that
+  had no equivalent in this fork at all. `pxx16` adds `collector_temp`, `dhw_temp`,
+  and `flow_temp` (solar circuit temperatures), `ed_sol_pump` (solar pump runtime
+  counter), plus the raw `out`/`status` fields FHEM itself never decodes further.
+  `pxxE8` adds live `input_fan_speed`/`output_fan_speed`,
+  `p_fanstage_x_airflow_inlet`/`_outlet` (m³/h), and `input_fan_power`/
+  `output_fan_power` — distinct from the existing `p07`-`p12`/`p43`-`p46`/`p99`
+  fan-stage *setting* write entities, and from firmware 2.06's own differently-laid-out
+  `E8fan206` block. Found via a systematic pass comparing every read block against
+  FHEM's `00_THZ.pm`; the write side had no equivalent gaps. Like the fault log, these
+  are new register blocks: existing config entries need to go through Reconfigure again
+  to add "Solar Circuit" / "Fan Status & Air Flow" to the polled blocks before the new
+  sensors appear.
 
 - **Firmware profile override** (`firmware_override` config option): Lets you force a
   specific FHEM-style register-map profile regardless of what the device reports —
@@ -43,6 +45,23 @@ All notable changes to the THZ integration are documented here.
   to `value_codec.py`. This is a new register block, so existing config entries need
   to go through Reconfigure again to add "Fault Log" to the polled blocks before the
   new sensors appear.
+
+### Correction
+
+- **"Live pump-running status for firmware 4.39/5.39" (previously listed above as a New
+  Feature) was a false alarm and has been removed.** A user report of the `zPumpHC`/
+  `zPumpDHW` technician "force" selects showing `unknown` was correctly diagnosed as
+  expected (those are one-shot write-only commands with no readable state, matching
+  FHEM's own model), but the follow-up assumption — that 4.39/5.39 lacked read-only
+  `dhw_pump`/`heating_circuit_pump`/`solar_pump` status entirely — was wrong. A later,
+  broader audit against FHEM's `00_THZ.pm` found that `register_map_all.py` (a universal
+  base register map already merged in for every firmware family) has defined identical
+  `pxxFB` entries for all three pumps at the same offsets all along. The sensors were
+  already there; the "fix" duplicated existing entries with no behavioural difference.
+  The duplicate block has been removed from `readings_map_439.py` again. If you added
+  these to your polled blocks via Reconfigure, no action is needed — the entities keep
+  working exactly the same, now sourced from the pre-existing base map instead of the
+  short-lived duplicate.
 
 ### Bug Fixes
 
