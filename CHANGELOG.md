@@ -6,6 +6,57 @@ All notable changes to the THZ integration are documented here.
 
 ## [Unreleased]
 
+### New Features
+
+- **Firmware profile override** (`firmware_override` config option): Lets you force a
+  specific FHEM-style register-map profile regardless of what the device reports —
+  including the `"439technician"` / `"539technician"` variants, matching the technician
+  profile some users already run under FHEM. Configurable via the integration's
+  Reconfigure flow ("Firmware profile" dropdown: Auto-detect, 2.06, 2.14, 2.14j, 4.39,
+  4.39 Technician, 5.39, 5.39 Technician). The detected firmware value shown in
+  diagnostics/`firmware_version` is unaffected — the override only changes which
+  register maps get loaded. Selecting a technician profile additionally exposes
+  `zResetLast10errors` (button), and `zPumpHC` / `zPumpDHW` / `zControlValveDHW`
+  (manual pump/valve force, for testing).
+
+- **Fault log sensors for firmware 4.39 / 5.39** (`pxxD1` block, command `D1`): Adds
+  `number_of_faults` plus `fault0CODE`/`fault0TIME`/`fault0DATE` through
+  `fault3CODE`/`fault3TIME`/`fault3DATE`, decoded to human-readable fault names and
+  `HH:MM` / `DD.MM` strings. Ported from FHEM's `D1last` parsing table — like the
+  reference implementation, only the 4 most recent entries are available, not 10
+  despite the name. Firmware 4.39/5.39 encode fault codes as 1 byte (vs. 2 bytes on
+  2.06) and encode fault times/dates with their two bytes swapped relative to the
+  2.06 encoding, requiring two new decode types (`turnhex2time`, `turnhexdate`) added
+  to `value_codec.py`. This is a new register block, so existing config entries need
+  to go through Reconfigure again to add "Fault Log" to the polled blocks before the
+  new sensors appear.
+
+### Bug Fixes
+
+- **Firmware "438" (and other off-point-release 4.3x builds) incorrectly used 5.39-style
+  register maps**: Any firmware string not explicitly listed in `FIRMWARE_MAPS`
+  (`register_map_manager.py`) fell through to a `"default"` entry that was really just
+  the 5.39 configuration, pulling in register offsets/fields that don't exist on 4.3x
+  hardware and causing garbage or wrong readings. `"539"` now has its own explicit entry,
+  and unrecognized firmware strings fall back to the 4.39-style maps instead — matching
+  FHEM's own `00_THZ.pm` fallback behavior ("in all other cases I assume firmware
+  4.39"). Affects, for example, LWZ 403 units reporting firmware `"438"`.
+
+- **`THZRegisterNotSupportedError` silently downgraded to a generic decode failure,
+  crashing config entry setup**: When a device cleanly reports "register not supported"
+  (a `01 04` response) for a register that genuinely doesn't exist on its firmware (e.g.
+  the 5.39-only `pxx0A033B` "Flow Rate" register on 4.3x hardware), `decode_response()`
+  deliberately raised `THZRegisterNotSupportedError` — but its own blanket
+  `except Exception` caught that same exception a few lines later and downgraded it to a
+  plain `None`, indistinguishable from a real communication failure. That surfaced as
+  "Failed setup, will retry: Error reading `<block>`: Failed to decode device response"
+  and aborted the whole config entry instead of just skipping the one unsupported block
+  (the existing `unsupported_blocks` handling in `async_setup_entry` was already written
+  for exactly this case, but never got the chance to run). Fixed by letting
+  `THZRegisterNotSupportedError` propagate cleanly out of `decode_response()`, and by
+  having `_async_update_block()` catch it and return `None` for that block instead of
+  raising `UpdateFailed`.
+
 ---
 
 ## [0.4.1] – 2026-06-29
