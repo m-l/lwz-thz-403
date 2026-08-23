@@ -8,6 +8,19 @@ All notable changes to the THZ integration are documented here.
 
 ### New Features
 
+- **Live pump-running status for firmware 4.39/5.39** (`pxxFB` block, command `FB`):
+  Adds `dhw_pump`, `heating_circuit_pump`, and `solar_pump` binary sensors reporting
+  whether each pump is actually running right now. Firmware 2.06/2.14 already exposed
+  these; 4.39/5.39 never had them wired up, even though the device already responds to
+  the `FB` command (it's read internally for the COP calculation) and the bit offsets
+  are documented in FHEM's `FBglob` table. Surfaced by a user report of the
+  `zPumpHC`/`zPumpDHW` technician "force" selects showing `unknown` — those are
+  one-shot write-only commands with no readable state by design (matching FHEM, which
+  defines no GET counterpart for them either); this adds the genuine read-only status
+  the user was actually looking for. Like the fault log, this is a new register block:
+  existing config entries need to go through Reconfigure again to add "Temperatures &
+  Status" to the polled blocks before the new sensors appear.
+
 - **Firmware profile override** (`firmware_override` config option): Lets you force a
   specific FHEM-style register-map profile regardless of what the device reports —
   including the `"439technician"` / `"539technician"` variants, matching the technician
