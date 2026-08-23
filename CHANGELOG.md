@@ -95,6 +95,33 @@ All notable changes to the THZ integration are documented here.
 
 ### Bug Fixes
 
+- **Entity IDs stayed permanently frozen to whatever they were the very first time this
+  integration was ever set up, no matter how many times you removed and re-added it or
+  changed `entity_id_style`/`alias`**: confirmed directly against a live install's
+  `.storage/core.entity_registry` and `.storage/core.config_entries` (the current config
+  entry correctly had `"entity_id_style":"fhem"` and `"alias":"lwz"`, yet an entity's
+  registry row showed `"suggested_object_id":null` and a `created_at` timestamp from
+  well before that entry existed). Home Assistant's own config-entry deletion does not
+  reliably null out an entity's `config_entry_id` back to `None` -- it can leave it
+  pointing at the now-deleted entry's id instead. `_async_cleanup_orphaned_entities()`
+  (added specifically to purge leftover entities on startup) only ever checked for
+  `config_entry_id is None`, so it never caught this "dangling id" case: the stale
+  registry row (and its `unique_id`) silently reattached to every subsequent setup,
+  and since `suggested_object_id` is consulted by Home Assistant only the very first
+  time a row is ever created for a given `unique_id`, no later `entity_id_style` or
+  `alias` change could ever take effect on it. Fixed by also treating an entity as
+  orphaned when its `config_entry_id` doesn't correspond to any config entry that
+  currently exists (`hass.config_entries.async_get_entry() is None`), not just when
+  it's literally `None`. Added test coverage for this function, which previously had
+  none at all.
+
+  **If you're hitting this**: this fix only prevents it going forward -- entities that
+  already reattached to your current config entry won't retroactively regenerate,
+  since their row still exists and now has a valid `config_entry_id`. With Home
+  Assistant fully stopped, back up and edit `.storage/core.entity_registry` to remove
+  every entry with `"platform":"thz"`, then start Home Assistant and re-add the
+  integration for entities that are genuinely computed fresh.
+
 - **Solar circuit and live fan sensors displayed only the device name instead of
   their own name** (e.g. every "fan"/"airflow" row in the entities list showing
   the same device name repeated instead of "Input Fan Speed", "Fan Stage Airflow
