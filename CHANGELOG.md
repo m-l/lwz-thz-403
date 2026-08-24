@@ -69,7 +69,34 @@ All notable changes to the THZ integration are documented here.
   `value_codec.py`. New register block — existing entries need Reconfigure to add
   "Fault Log" to polled blocks before sensors appear.
 
+- **`p99CoolingHC1AreaFan` switch** (register `0B0613`, firmware 5.39/5.39 Technician
+  only, `write_map_539.py`): a cooling-related area-fan control discovered via an FHEM
+  forum thread (mwuerr/immi), proposed there but not yet merged into upstream
+  `00_THZ.pm`. Added following the exact pattern of the existing `p99CoolingHC1Switch`
+  (`0B0287`) — same `"switch"` type, `decode_type: "1clean"`, added to
+  `_COOLING_WRITE_KEYS` (`register_map_manager.py`) so it's excluded on firmware without
+  cooling, plus a `cooling_hc1_area_fan` translation key/string. Only reachable on
+  `"539"`/`"539technician"` — `FIRMWARE_MAPS` never includes `write_map_539` for
+  `"439"`/`"439technician"`, so 4.39-profile users (including technician) will not see
+  this entity, same as they don't see `p99CoolingHC1Switch` today.
+
 ### Bug Fixes
+
+- **`zPumpHC`/`zPumpDHW` (technician-profile manual pump-override entities, commands
+  `0A0052`/`0A0056`) were non-functional on every install that exposed them**: both were
+  typed `"select"` with `decode_type: "0clean"`, but `"0clean"` isn't a key in
+  `SELECT_MAP` (`value_maps.py`) — it's FHEM's plain single-byte integer encoding, not a
+  named-option enum. Confirmed against `00_THZ.pm`, which defines both as `argMin => "0",
+  argMax => "1", type => "0clean"`, the same encoding it uses for other plain
+  0-100/1-31/etc. numeric writes — there was never a richer option set to model. In
+  practice this meant `select.py` fell back to an empty options list (nothing selectable
+  in the UI), and any read or write that did reach `value_codec.py` raised `ValueError:
+  Unknown decode_type: 0clean` from `decode_select`/`encode_select`. Fixed by changing
+  both entries' `"type"` from `"select"` to `"number"` (min `0`/max `1`/step `1`),
+  matching the existing pattern for other binary write registers (e.g. `p80EnableSolar`).
+  `decode_type: "0clean"` needed no change — `THZValueCodec.decode_number`/`encode_number`
+  already special-case it as a single-byte 0/1 read/write, exactly matching the command's
+  wire format.
 
 - **`entity_id_style: "fhem"` never actually worked, for any entity, on any install**
   (you always got HA's default naming — device name and often area name glued on, e.g.
@@ -127,6 +154,44 @@ All notable changes to the THZ integration are documented here.
   created. Fixed by adding the same three params to `THZButton.__init__()`, matching the
   other write entities. Added a regression test through `async_setup_write_platform()`
   itself, since that's the path that broke and nothing previously exercised it.
+
+- **`ResetErrors` (firmware 2.14, command `F8`) created no entity at all**: it was typed
+  `"type": "0clean"` in `write_map_214.py` — a decode-type token, not a real platform
+  type. `platform_setup.py` dispatches entries by matching `entry["type"]` against the
+  literal platform strings each `async_setup_entry()` passes in (`"number"`, `"switch"`,
+  `"select"`, `"button"`); `"0clean"` matches none of them, so the entry silently
+  vanished from setup instead of erroring. Confirmed against `00_THZ.pm`
+  (`argMin => "0", argMax => "0", type => "0clean"`, cmd2 `F8`) — a fixed-value,
+  no-range write, the same shape as `zResetLast10errors` (`argMin`/`argMax` both `"0"`),
+  which this fork already models as a `"button"`. Fixed by changing `"type"` to
+  `"button"` and `decode_type` from `""` to `"0clean"` (matching FHEM's own type for
+  this entry — `button.py` always writes a fixed `\x00` payload regardless, so this
+  only affects readability of the map, not behavior), plus the `mdi:trash-can-outline`
+  icon used for the equivalent D1 button. A `reset_errors` translation key/string was
+  already present and unused — no translation changes needed.
+
+- **~100 firmware 2.06 writable parameters created no entities at all** — essentially
+  every writable setting on 2.06 (`p01RoomTempDay` through `p80EnableSolar`, plus the
+  DHW/HC1/HC2/FAN1/FAN2 schedule enable and day-of-week flags): all 101 entries in
+  `write_map_206.py` were typed `"type": "pclean"`, the same class of bug as
+  `ResetErrors` above — `"pclean"` is `write_map_206.py`'s decode-type-flavored label
+  (its `decode_type` field is separately, correctly, `"pClean"` throughout) but isn't
+  one of `platform_setup.py`'s real platform strings, so none of them ever matched a
+  dispatch and the entire firmware-2.06 writable surface silently disappeared from
+  setup. Every one of these entries has an explicit, meaningful `min`/`max` numeric
+  range (temperatures, fan stages, hysteresis, pump-cycle counts, and 0/1 enable/weekday
+  flags with a real range rather than a fixed value) and none map to an existing
+  `SELECT_MAP` entry, so — consistent with how every comparable numeric parameter is
+  typed elsewhere in this codebase (`write_map_214.py`, `write_map_X39tech.py`,
+  `write_map_439_539.py`) — all 101 were changed from `"pclean"` to `"number"`.
+  `"switch"` was intentionally not used for the 0/1 entries: this codebase's only two
+  existing `"switch"` entries (`p99CoolingHC1Switch`/`p99CoolingHC2Switch`) are
+  standalone on/off toggles, not part of a numeric range family like these
+  schedule-flag parameters. `decode_type: "pClean"` needed no change —
+  `THZValueCodec.decode_number`/`encode_number` treat any decode_type other than
+  `"0clean"` as standard 2-byte scaled encoding, which is what these registers already
+  expect. (2.06's `"ptime"`-typed schedule start/end-time entries are a separate,
+  pre-existing gap — not a real platform type either — but out of scope for this fix.)
 
 ### Correction
 
