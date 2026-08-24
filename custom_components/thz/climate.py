@@ -387,6 +387,7 @@ async def async_setup_entry(
                     manual_setpoint_entry=dhw_manual_entry,
                     cool_switch_entry=None,
                     cool_setpoint_entry=None,
+                    opmode_entry=opmode_entry,
                     entity_id_style=entity_id_style,
                     entity_id_prefix=entity_id_prefix,
                 )
