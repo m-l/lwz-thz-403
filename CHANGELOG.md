@@ -193,6 +193,31 @@ All notable changes to the THZ integration are documented here.
   expect. (2.06's `"ptime"`-typed schedule start/end-time entries are a separate,
   pre-existing gap — not a real platform type either — but out of scope for this fix.)
 
+- **Climate entities' Mode selector (Heat/Off) did nothing on any firmware without
+  active-cooling support** (i.e. every install except 5.39 with cooling entries
+  present): `async_set_hvac_mode()`'s `HEAT`/`OFF` branch only ever toggled the cooling
+  switch, so with no cooling switch to toggle, selecting "Off" silently changed
+  nothing on the device -- the heat pump kept heating regardless. There is no
+  per-circuit "off" register on this hardware; the device's real off is the global
+  `pOpMode` standby state. Fixed by dropping `OFF` from `hvac_modes` entirely
+  (`[HEAT]`, or `[HEAT, COOL]` when cooling is supported) and pointing the docstring
+  at `preset_mode`'s new `"standby"` option instead.
+
+- **Preset selector only exposed 3 of the device's 7 real operating modes, and read
+  from the wrong register**: `preset_mode` inferred HA's `comfort`/`sleep`/`away`
+  presets from each circuit's own `hcOpMode`/`dhwOpMode` readback (`normal`/
+  `setback`/`standby`/`restart`), while `async_set_preset_mode()` actually wrote the
+  separate global `pOpMode` register (`0A0112`, decode_type `"2opmode"`, 7 real
+  options -- `automatic`/`DAYmode`/`DHWmode`/`emergency`/`manual`/`setback`/`standby`,
+  matching FHEM's `%OpMode` in `docs/legacy/00_THZ.pm`). Reading and writing different
+  registers meant the displayed preset couldn't reliably reflect what a write had
+  actually set, and 4 of the 7 real modes (`automatic`, `DHWmode`, `manual`,
+  `emergency`) were never reachable at all. Fixed by reading/writing `pOpMode`
+  directly on both sides -- `preset_mode` now returns the device's own mode name
+  (cached via a new `_async_read_op_mode()`, mirroring the existing fan-stage-cache
+  pattern) and all 7 real options are exposed, using the device's own names instead
+  of HA's generic comfort/sleep/away vocabulary.
+
 ### Correction
 
 - **"Live pump-running status for firmware 4.39/5.39" (previously a New Feature above)
