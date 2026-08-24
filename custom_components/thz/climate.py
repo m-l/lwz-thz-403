@@ -4,7 +4,14 @@ This module provides climate entities for the THZ integration.  Two climate
 entities are created when the required data blocks are available:
 
 - **Heating Circuit 1 (HC1)**: reads current / target room temperature from
-  the ``pxxF4`` coordinator.  When the write-register map contains both
+  the ``pxxF4`` coordinator.  HC1 has independently-scheduled day
+  (``p01RoomTempDayHC1``) and night (``p02RoomTempNightHC1``) setpoints; the
+  device itself decides which one is active at any given moment. Setting a
+  new temperature reads both registers fresh and writes to whichever one
+  currently matches the live ``roomSetTemp`` reading, so the change actually
+  takes effect regardless of whether day or night mode is currently active
+  (falls back to the day register if neither matches closely enough, e.g.
+  right at a day/night transition). When the write-register map contains both
   ``p99CoolingHC1Switch`` and ``p99CoolingHC1SetTemp`` (present on devices
   that support active cooling), the entity also exposes ``COOL`` mode.
   Cooling-active status is read from the ``pxx0A0176`` coordinator
@@ -74,6 +81,7 @@ _TEMP_FACTOR = 10.0
 
 # Write-register name candidates for heat setpoints (tried in order)
 _HC1_HEAT_SETPOINT_NAMES = ["p01RoomTempDayHC1", "p01RoomTempDay"]
+_HC1_NIGHT_SETPOINT_NAMES = ["p02RoomTempNightHC1", "p02RoomTempNight"]
 _DHW_SETPOINT_NAMES = ["p04DHWsetDayTemp", "p04DHWsetTempDay"]
 
 # Write-register names for HC1 cooling (present on devices with active cooling support)
@@ -242,6 +250,7 @@ async def async_setup_entry(
             _LOGGER.error("Required fields missing from pxxF4 map; skipping HC1 climate entity")
         else:
             heat_entry = _find_entry(write_registers, _HC1_HEAT_SETPOINT_NAMES)
+            night_entry = _find_entry(write_registers, _HC1_NIGHT_SETPOINT_NAMES)
             cool_switch_entry = write_registers.get(_HC1_COOL_SWITCH_NAME)
             cool_setpoint_entry = write_registers.get(_HC1_COOL_SETPOINT_NAME)
 
@@ -275,6 +284,7 @@ async def async_setup_entry(
                     cooling_bit=a176_cooling[1] if a176_cooling else None,
                     compressor_bit=a176_compressor[1] if a176_compressor else None,
                     heat_setpoint_entry=heat_entry,
+                    night_setpoint_entry=night_entry,
                     cool_switch_entry=cool_switch_entry,
                     cool_setpoint_entry=cool_setpoint_entry,
                     opmode_entry=opmode_entry,
@@ -492,6 +502,7 @@ class THZClimate(CoordinatorEntity, ClimateEntity):
         compressor_bit: int | None = None,
         entity_id_style: str = ENTITY_ID_STYLE_DEFAULT,
         entity_id_prefix: str | None = None,
+        night_setpoint_entry: dict | None = None,
     ) -> None:
         """Initialise a THZ climate entity.
 
@@ -542,6 +553,7 @@ class THZClimate(CoordinatorEntity, ClimateEntity):
         self._op_mode_length = op_mode_length
 
         self._heat_setpoint_entry = heat_setpoint_entry
+        self._night_setpoint_entry = night_setpoint_entry
         self._cool_switch_entry = cool_switch_entry
         self._cool_setpoint_entry = cool_setpoint_entry
         self._cooling_byte = cooling_byte
@@ -949,33 +961,73 @@ class THZClimate(CoordinatorEntity, ClimateEntity):
 
     # ── Private write helpers ───────────────────────────────────────────────
 
+    async def _async_read_setpoint(self, entry: dict) -> float | None:
+        """Read a heat-setpoint register's current value directly from the device."""
+        step = _get_step(entry)
+        decode_type = entry.get("decode_type", "5temp")
+        try:
+            async with self._device.lock:
+                value_bytes = await self.hass.async_add_executor_job(
+                    self._device.read_value,
+                    bytes.fromhex(entry["command"]),
+                    "get",
+                    WRITE_REGISTER_OFFSET,
+                    WRITE_REGISTER_LENGTH,
+                )
+            if value_bytes:
+                return THZValueCodec.decode_number(value_bytes, step, decode_type)
+        except (ValueError, TypeError, RuntimeError, ConnectionError, OSError) as err:
+            _LOGGER.warning("Could not read setpoint register for %s: %s", self.name, err)
+        return None
+
     async def _async_write_heat_setpoint(self, temperature: float) -> None:
-        """Write the heating setpoint to the device.
+        """Write the heating setpoint that is currently driving roomSetTemp.
+
+        HC1 has independently-scheduled day/night setpoints; the device
+        itself decides which one is active. Always writing the day register
+        silently no-ops from the user's point of view whenever night is the
+        one actually in effect. Instead, read both registers fresh and write
+        to whichever one currently matches the live roomSetTemp reading,
+        falling back to day if neither matches closely enough (e.g. right at
+        a day/night transition).
 
         Args:
             temperature: Target temperature in °C.
         """
-        if self._heat_setpoint_entry is None:
+        active_temp = self.target_temperature
+        day_entry = self._heat_setpoint_entry
+        night_entry = self._night_setpoint_entry
+        target_entry = day_entry
+
+        if night_entry is not None and day_entry is not None and active_temp is not None:
+            day_value = await self._async_read_setpoint(day_entry)
+            night_value = await self._async_read_setpoint(night_entry)
+            day_matches = day_value is not None and abs(day_value - active_temp) < 0.05
+            night_matches = night_value is not None and abs(night_value - active_temp) < 0.05
+            if night_matches and not day_matches:
+                target_entry = night_entry
+
+        if target_entry is None:
             _LOGGER.warning(
                 "Cannot set heating setpoint on %s: no write command available",
                 self.name,
             )
             return
 
-        entry = self._heat_setpoint_entry
-        step = _get_step(entry)
-        decode_type = entry.get("decode_type", "5temp")
+        step = _get_step(target_entry)
+        decode_type = target_entry.get("decode_type", "5temp")
 
         _LOGGER.debug(
-            "Writing heat setpoint %.1f °C to %s (cmd=%s, step=%s)",
-            temperature, self.name, entry["command"], step,
+            "Writing heat setpoint %.1f °C to %s (cmd=%s, step=%s, register=%s)",
+            temperature, self.name, target_entry["command"], step,
+            "night" if target_entry is night_entry else "day",
         )
         try:
             value_bytes = THZValueCodec.encode_number(temperature, step, decode_type)
             async with self._device.lock:
                 await self.hass.async_add_executor_job(
                     self._device.write_value,
-                    bytes.fromhex(entry["command"]),
+                    bytes.fromhex(target_entry["command"]),
                     value_bytes,
                 )
             await self.coordinator.async_request_refresh()
