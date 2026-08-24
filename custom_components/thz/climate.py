@@ -20,9 +20,16 @@ entities are created when the required data blocks are available:
 - **Heating Circuit 2 (HC2)**: reads target temperature from the ``pxxF5``
   coordinator.  Created only when ``p01RoomTempDayHC2`` is present in the
   write-register map.  No room-temperature sensor is available for HC2.
+  Like HC1, HC2 has independently-scheduled day/night setpoints
+  (``p01RoomTempDayHC2`` / ``p02RoomTempNightHC2``); setting a new
+  temperature writes to whichever register is currently active, using the
+  same logic as HC1.
 
 - **Domestic Hot Water (DHW)**: reads current / target water temperature from
-  the ``pxxF3`` coordinator and supports ``HEAT`` mode only.
+  the ``pxxF3`` coordinator and supports ``HEAT`` mode only.  Like HC1, DHW
+  has independently-scheduled day (``p04DHWsetDayTemp``) and night
+  (``p05DHWsetNightTemp``) setpoints, and setting a new temperature writes to
+  whichever register is currently active, using the same logic as HC1.
 
 All HC entities expose:
 
@@ -83,6 +90,7 @@ _TEMP_FACTOR = 10.0
 _HC1_HEAT_SETPOINT_NAMES = ["p01RoomTempDayHC1", "p01RoomTempDay"]
 _HC1_NIGHT_SETPOINT_NAMES = ["p02RoomTempNightHC1", "p02RoomTempNight"]
 _DHW_SETPOINT_NAMES = ["p04DHWsetDayTemp", "p04DHWsetTempDay"]
+_DHW_NIGHT_SETPOINT_NAMES = ["p05DHWsetNightTemp", "p05DHWsetTempNight"]
 
 # Write-register names for HC1 cooling (present on devices with active cooling support)
 _HC1_COOL_SWITCH_NAME = "p99CoolingHC1Switch"
@@ -90,6 +98,7 @@ _HC1_COOL_SETPOINT_NAME = "p99CoolingHC1SetTemp"
 
 # Write-register names for HC2
 _HC2_HEAT_SETPOINT_NAMES = ["p01RoomTempDayHC2"]
+_HC2_NIGHT_SETPOINT_NAMES = ["p02RoomTempNightHC2"]
 _HC2_COOL_SWITCH_NAME = "p99CoolingHC2Switch"
 _HC2_COOL_SETPOINT_NAME = "p99CoolingHC2SetTemp"
 
@@ -301,6 +310,7 @@ async def async_setup_entry(
             _LOGGER.error("Required fields missing from pxxF5 map; skipping HC2 climate entity")
         else:
             hc2_heat_entry = _find_entry(write_registers, _HC2_HEAT_SETPOINT_NAMES)
+            hc2_night_entry = _find_entry(write_registers, _HC2_NIGHT_SETPOINT_NAMES)
             if hc2_heat_entry is not None:
                 hc2_cool_switch_entry = write_registers.get(_HC2_COOL_SWITCH_NAME)
                 hc2_cool_setpoint_entry = write_registers.get(_HC2_COOL_SETPOINT_NAME)
@@ -330,6 +340,7 @@ async def async_setup_entry(
                         cooling_bit=a176_cooling[1] if a176_cooling else None,
                         compressor_bit=a176_compressor[1] if a176_compressor else None,
                         heat_setpoint_entry=hc2_heat_entry,
+                        night_setpoint_entry=hc2_night_entry,
                         cool_switch_entry=hc2_cool_switch_entry,
                         cool_setpoint_entry=hc2_cool_setpoint_entry,
                         opmode_entry=opmode_entry,
@@ -345,6 +356,7 @@ async def async_setup_entry(
             _LOGGER.error("Required fields missing from pxxF3 map; skipping DHW climate entity")
         else:
             dhw_entry = _find_entry(write_registers, _DHW_SETPOINT_NAMES)
+            dhw_night_entry = _find_entry(write_registers, _DHW_NIGHT_SETPOINT_NAMES)
             entities.append(
                 THZClimate(
                     coordinator=dhw_coordinator,
@@ -359,6 +371,7 @@ async def async_setup_entry(
                     op_mode_offset=f3_opmode[0],
                     op_mode_length=f3_opmode[1],
                     heat_setpoint_entry=dhw_entry,
+                    night_setpoint_entry=dhw_night_entry,
                     cool_switch_entry=None,
                     cool_setpoint_entry=None,
                     entity_id_style=entity_id_style,
