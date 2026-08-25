@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from datetime import timedelta, time as dt_time
+from datetime import datetime, timedelta, time as dt_time
 import logging
 from typing import Any
 
@@ -20,6 +20,7 @@ from homeassistant.core import (
 )
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -52,6 +53,21 @@ BACKUP_SUBDIR = "thz_backups"
 # one-shot action with no state, and "ptime" is a legacy/unused type not
 # consumed by any current platform, so neither is backed up.
 _RESTORABLE_REGISTER_TYPES = {"number", "switch", "select", "time", "schedule"}
+
+# The device's real-time clock is exposed as five plain "number" registers
+# (day/month/year/hour/minute), NOT as a "time"-typed register. They are
+# handled specially by backup/restore/the periodic clock check below rather
+# than as ordinary numeric parameters: restoring an old backed-up clock
+# value would set the heat pump's clock back to whenever the backup was
+# taken, and pClockYear's declared min/max ("12".."20") is a stale bound
+# that would otherwise get a real year like 26 clamped down to 20.
+_CLOCK_REGISTER_NAMES = (
+    "pClockYear", "pClockMonth", "pClockDay", "pClockHour", "pClockMinutes",
+)
+# Device clock has no seconds field, so a little rounding slop is expected;
+# only flag/act on drift beyond these thresholds.
+_CLOCK_DRIFT_WARN_SECONDS = 60  # periodic check: log + optionally auto-correct
+_CLOCK_DRIFT_BACKUP_SECONDS = 3600  # backup: always auto-correct past this
 
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
@@ -211,6 +227,22 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
         "entity_visibility": entity_visibility,
         "entity_id_prefix": entity_id_prefix,
     }
+
+    # Periodic clock-drift check (independent of per-entity polling of the
+    # individual pClock* number entities — see _async_check_and_maybe_sync_clock).
+    # Always runs so drift is logged; only writes a correction back to the
+    # device when the "auto_sync_clock" option is enabled.
+    async def _periodic_clock_check(_now=None) -> None:
+        try:
+            await _async_check_and_maybe_sync_clock(
+                hass, config_entry, device, write_manager
+            )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("THZ periodic clock check failed: %s", err)
+
+    hass.data[DOMAIN][config_entry.entry_id]["unsub_clock_check"] = (
+        async_track_time_interval(hass, _periodic_clock_check, timedelta(minutes=15))
+    )
 
     # Forward setup to platforms
     await hass.config_entries.async_forward_entry_setups(
@@ -374,6 +406,133 @@ def _resolve_entry_data(
     if available_entries:
         return next(iter(available_entries.values())), None
     return None, {"success": False, "error": "THZ device not initialised"}
+
+
+async def _async_read_device_clock(
+    hass: HomeAssistant, device: THZDevice, write_manager
+) -> datetime | None:
+    """Read the device's current date/time from its 5 pClock* registers.
+
+    Returns a naive datetime representing the device's own wall-clock
+    reading (no timezone concept on the device side), or None if any of the
+    five registers is missing from the current register map or unreadable.
+    """
+    write_registers = write_manager.get_all_registers()
+    parts: dict[str, int] = {}
+    for name in _CLOCK_REGISTER_NAMES:
+        entry = write_registers.get(name)
+        if entry is None:
+            return None
+        async with device.lock:
+            value_bytes = await hass.async_add_executor_job(
+                device.read_value,
+                bytes.fromhex(entry["command"]),
+                "get",
+                WRITE_REGISTER_OFFSET,
+                WRITE_REGISTER_LENGTH,
+            )
+        if not value_bytes:
+            return None
+        try:
+            parts[name] = int(
+                THZValueCodec.decode_number(value_bytes, 1.0, entry["decode_type"])
+            )
+        except (ValueError, IndexError):
+            return None
+    try:
+        return datetime(
+            2000 + parts["pClockYear"],
+            parts["pClockMonth"],
+            parts["pClockDay"],
+            parts["pClockHour"],
+            parts["pClockMinutes"],
+        )
+    except (KeyError, ValueError):
+        return None
+
+
+async def _async_write_device_clock(
+    hass: HomeAssistant, device: THZDevice, write_manager, when: datetime
+) -> None:
+    """Write ``when`` (a local wall-clock time) onto the 5 pClock* registers.
+
+    Bypasses each register's declared min/max (pClockYear's in particular is
+    a stale "12".."20" bound) since the value being written is always a
+    freshly computed, valid current date/time component, never user input.
+    """
+    write_registers = write_manager.get_all_registers()
+    values = {
+        "pClockYear": when.year % 100,
+        "pClockMonth": when.month,
+        "pClockDay": when.day,
+        "pClockHour": when.hour,
+        "pClockMinutes": when.minute,
+    }
+    for name, value in values.items():
+        entry = write_registers.get(name)
+        if entry is None:
+            continue
+        value_bytes = THZValueCodec.encode_number(value, 1.0, entry["decode_type"])
+        async with device.lock:
+            await hass.async_add_executor_job(
+                device.write_value, bytes.fromhex(entry["command"]), value_bytes
+            )
+
+
+async def _async_check_and_maybe_sync_clock(
+    hass: HomeAssistant, config_entry: ConfigEntry, device: THZDevice, write_manager
+) -> None:
+    """Periodic check: log clock drift, and auto-correct it if opted in.
+
+    Runs on a fixed timer (see async_setup_entry) independently of the
+    per-entity polling of the individual pClock* number entities, so all
+    five components are read together as one consistent snapshot rather
+    than at whatever moments their individual polls happen to land.
+    """
+    device_dt = await _async_read_device_clock(hass, device, write_manager)
+    if device_dt is None:
+        return
+    local_now = dt_util.now().replace(tzinfo=None, second=0, microsecond=0)
+    drift = (device_dt - local_now).total_seconds()
+    if abs(drift) <= _CLOCK_DRIFT_WARN_SECONDS:
+        return
+    _LOGGER.warning(
+        "THZ device clock drifted %.0f minute(s) from local time "
+        "(device=%s, local=%s)",
+        drift / 60, device_dt, local_now,
+    )
+    if config_entry.data.get("auto_sync_clock", False):
+        await _async_write_device_clock(hass, device, write_manager, local_now)
+        _LOGGER.info("THZ device clock auto-corrected to %s", local_now)
+        return
+
+    # auto_sync_clock is off, so this drift can't be corrected automatically.
+    # Surface it to the user — but at most once per calendar day, since this
+    # check runs every 15 minutes and a persistently-drifted clock would
+    # otherwise spam a fresh notification ~96 times a day.
+    entry_data = hass.data.get(DOMAIN, {}).get(config_entry.entry_id)
+    today = dt_util.now().date()
+    if entry_data is not None and entry_data.get("_clock_notify_date") == today:
+        return
+    if entry_data is not None:
+        entry_data["_clock_notify_date"] = today
+    await hass.services.async_call(
+        "persistent_notification",
+        "create",
+        {
+            "title": "THZ Device Clock Drifted",
+            "message": (
+                f"The heat pump's clock is off by about {abs(drift) / 60:.0f} "
+                f"minute(s) (device reads {device_dt.strftime('%Y-%m-%d %H:%M')}, "
+                f"local time is {local_now.strftime('%Y-%m-%d %H:%M')}).\n\n"
+                "Auto-sync clock is turned off, so this wasn't corrected "
+                "automatically. Enable it under the integration's "
+                "Reconfigure screen to fix this going forward."
+            ),
+            "notification_id": f"thz_clock_drift_{config_entry.entry_id}",
+        },
+        blocking=True,
+    )
 
 
 async def _async_setup_services(hass: HomeAssistant) -> None:
@@ -803,6 +962,37 @@ async def _async_setup_services(hass: HomeAssistant) -> None:
                 read_errors.append(f"{name}: {err}")
                 _LOGGER.warning("backup_parameters: failed to read %s: %s", name, err)
 
+        # Sanity-check the device's real-time clock against local time.
+        # Backup is otherwise read-only, but a grossly wrong clock (over an
+        # hour off — e.g. after a power loss or reset) throws off every
+        # schedule the heat pump runs, so it's corrected here as a
+        # deliberate exception. Smaller drift is left alone; that's what the
+        # periodic auto_sync_clock check (1-minute threshold) is for.
+        clock_drift_seconds: float | None = None
+        clock_corrected = False
+        try:
+            device_dt = datetime(
+                2000 + int(parameters["pClockYear"]["value"]),
+                int(parameters["pClockMonth"]["value"]),
+                int(parameters["pClockDay"]["value"]),
+                int(parameters["pClockHour"]["value"]),
+                int(parameters["pClockMinutes"]["value"]),
+            )
+            local_now = dt_util.now().replace(tzinfo=None, second=0, microsecond=0)
+            clock_drift_seconds = (device_dt - local_now).total_seconds()
+            if abs(clock_drift_seconds) > _CLOCK_DRIFT_BACKUP_SECONDS:
+                await _async_write_device_clock(hass, device, write_manager, local_now)
+                clock_corrected = True
+                _LOGGER.warning(
+                    "backup_parameters: device clock was off by %.0f minute(s) "
+                    "(device=%s, local=%s); corrected to local time.",
+                    clock_drift_seconds / 60, device_dt, local_now,
+                )
+        except (KeyError, ValueError, TypeError) as err:
+            _LOGGER.debug(
+                "backup_parameters: could not evaluate device clock drift: %s", err
+            )
+
         created = dt_util.utcnow().isoformat()
         backup_doc = {
             "created": created,
@@ -842,6 +1032,8 @@ async def _async_setup_services(hass: HomeAssistant) -> None:
             "parameter_count": len(parameters),
             "read_errors": read_errors[:20],
             "created": created,
+            "clock_drift_seconds": clock_drift_seconds,
+            "clock_corrected": clock_corrected,
         }
 
     async def _async_handle_restore_parameters(call: ServiceCall) -> ServiceResponse:
@@ -916,6 +1108,12 @@ async def _async_setup_services(hass: HomeAssistant) -> None:
         failed: list[str] = []
 
         for name, saved in saved_parameters.items():
+            if name in _CLOCK_REGISTER_NAMES:
+                # The device's real-time clock is never restored from a
+                # backed-up value — that would set it back to whenever the
+                # backup was taken. It's synced to the current local time
+                # separately below instead.
+                continue
             if only_set is not None and name not in only_set:
                 continue
             entry = write_registers.get(name)
@@ -987,11 +1185,49 @@ async def _async_setup_services(hass: HomeAssistant) -> None:
             except (OSError, RuntimeError, ConnectionError) as err:
                 failed.append(f"{name}: {err}")
 
+        # The device clock is always synced to the current local time as
+        # part of a restore, never taken from the backup file — see the
+        # skip above. dry_run skips this write too, and just reports what
+        # the target time would have been.
+        local_now = dt_util.now().replace(tzinfo=None, second=0, microsecond=0)
+        clock_synced = False
+        if not dry_run:
+            try:
+                await _async_write_device_clock(hass, device, write_manager, local_now)
+                clock_synced = True
+            except (OSError, RuntimeError, ConnectionError) as err:
+                failed.append(f"<device clock>: {err}")
+
         _LOGGER.info(
             "THZ restore_parameters: %s%d restored, %d skipped (missing), "
-            "%d failed, from %s",
+            "%d failed, clock_synced=%s, from %s",
             "[DRY RUN] " if dry_run else "",
-            restored, len(skipped_missing), len(failed), path,
+            restored, len(skipped_missing), len(failed), clock_synced, path,
+        )
+
+        notification_message = (
+            f"File: {os.path.basename(path)}\n"
+            f"Backup created: {backup_doc.get('created')}\n"
+            f"Restored: {restored} / {len(saved_parameters)}\n"
+            f"Skipped (missing): {len(skipped_missing)}\n"
+            f"Failed: {len(failed)}\n"
+            + (
+                f"Clock synced to: {local_now.isoformat(timespec='minutes')}"
+                if clock_synced
+                else f"Clock: would be synced to {local_now.isoformat(timespec='minutes')} (dry run)"
+                if dry_run
+                else "Clock: not synced (write failed, see failed list)"
+            )
+        )
+        await hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": f"THZ Parameter Restore {'(dry run) ' if dry_run else ''}Complete",
+                "message": notification_message,
+                "notification_id": "thz_restore_parameters",
+            },
+            blocking=True,
         )
 
         return {
@@ -1005,6 +1241,8 @@ async def _async_setup_services(hass: HomeAssistant) -> None:
             "skipped_missing_count": len(skipped_missing),
             "failed": failed[:20],
             "failed_count": len(failed),
+            "clock_synced": clock_synced,
+            "clock_target": local_now.isoformat(timespec="minutes"),
         }
 
     async def _async_handle_list_parameter_backups(call: ServiceCall) -> ServiceResponse:
@@ -1333,6 +1571,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Clean up device connection
         entry_data = hass.data[DOMAIN].get(entry.entry_id)
         if entry_data:
+            unsub_clock_check = entry_data.get("unsub_clock_check")
+            if unsub_clock_check:
+                unsub_clock_check()
             device = entry_data.get("device")
             if device:
                 await hass.async_add_executor_job(device.close)
