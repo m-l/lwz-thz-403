@@ -968,16 +968,16 @@ async def _async_setup_services(hass: HomeAssistant) -> None:
         # schedule the heat pump runs, so it's corrected here as a
         # deliberate exception. Smaller drift is left alone; that's what the
         # periodic auto_sync_clock check (1-minute threshold) is for.
+        #
+        # Read via _async_read_device_clock rather than pulling from
+        # `parameters` above: the five pClock* registers are type "pclean"
+        # (no platform claims that type as an entity), so they're never
+        # added to `parameters` by the loop's _RESTORABLE_REGISTER_TYPES
+        # filter — reading them back out of it here would always miss.
         clock_drift_seconds: float | None = None
         clock_corrected = False
-        try:
-            device_dt = datetime(
-                2000 + int(parameters["pClockYear"]["value"]),
-                int(parameters["pClockMonth"]["value"]),
-                int(parameters["pClockDay"]["value"]),
-                int(parameters["pClockHour"]["value"]),
-                int(parameters["pClockMinutes"]["value"]),
-            )
+        device_dt = await _async_read_device_clock(hass, device, write_manager)
+        if device_dt is not None:
             local_now = dt_util.now().replace(tzinfo=None, second=0, microsecond=0)
             clock_drift_seconds = (device_dt - local_now).total_seconds()
             if abs(clock_drift_seconds) > _CLOCK_DRIFT_BACKUP_SECONDS:
@@ -988,9 +988,9 @@ async def _async_setup_services(hass: HomeAssistant) -> None:
                     "(device=%s, local=%s); corrected to local time.",
                     clock_drift_seconds / 60, device_dt, local_now,
                 )
-        except (KeyError, ValueError, TypeError) as err:
+        else:
             _LOGGER.debug(
-                "backup_parameters: could not evaluate device clock drift: %s", err
+                "backup_parameters: could not read device clock to evaluate drift"
             )
 
         created = dt_util.utcnow().isoformat()
