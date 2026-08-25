@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
+import json
+import os
+from datetime import timedelta, time as dt_time
 import logging
+from typing import Any
 
 import voluptuous as vol
 
@@ -18,6 +21,7 @@ from homeassistant.core import (
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_ENTITY_ID_STYLE,
@@ -34,11 +38,20 @@ from .const import (
     should_hide_entity,
 )
 from .thz_device import THZDevice, THZRegisterNotSupportedError
+from .time import quarters_to_time, time_to_quarters
+from .value_codec import THZValueCodec
 
 _LOGGER = logging.getLogger(__name__)
 
 # Hex dump formatting constants
 BYTES_PER_HEX_LINE = 16  # Number of bytes to display per line in hex dumps
+
+# Parameter backup/restore constants
+BACKUP_SUBDIR = "thz_backups"
+# Register types that hold a persistent, restorable value. "button" is a
+# one-shot action with no state, and "ptime" is a legacy/unused type not
+# consumed by any current platform, so neither is backed up.
+_RESTORABLE_REGISTER_TYPES = {"number", "switch", "select", "time", "schedule"}
 
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
@@ -295,6 +308,72 @@ async def async_refresh_block(
     if not found:
         _LOGGER.warning("async_refresh_block: block '%s' not found in any coordinator", normalized)
     return found
+
+
+# ---------------------------------------------------------------------------
+# Parameter backup/restore helpers
+# ---------------------------------------------------------------------------
+
+def _backups_dir(hass: HomeAssistant) -> str:
+    """Return the on-disk path of the parameter backups directory.
+
+    This lives inside the HA config directory (``config/thz_backups``), so
+    it is automatically swept up by Home Assistant's own Backup feature —
+    creating an HA backup backs these files up too, and restoring one
+    brings them back, with no extra steps.
+    """
+    return hass.config.path(BACKUP_SUBDIR)
+
+
+def _sanitize_label(label: str | None) -> str:
+    """Turn a user-supplied label into a safe filename suffix."""
+    if not label:
+        return ""
+    safe = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in label.strip())
+    safe = safe.strip("_")
+    return f"_{safe}" if safe else ""
+
+
+def _parse_hhmm(value: str | None) -> dt_time | None:
+    """Parse an ``"HH:MM"`` string (as stored in a backup) to a time, or None."""
+    if not value:
+        return None
+    hour, minute = map(int, value.split(":"))
+    return dt_time(hour, minute)
+
+
+def _resolve_entry_data(
+    hass: HomeAssistant, requested_entry_id: str | None
+) -> tuple[dict | None, dict | None]:
+    """Resolve the target THZ config entry's data dict.
+
+    Mirrors the entry-lookup pattern used by the other THZ services. Returns
+    ``(entry_data, error_response)`` — exactly one of the two is not None.
+    """
+    available_entries: dict[str, dict] = {
+        eid: ed
+        for eid, ed in hass.data.get(DOMAIN, {}).items()
+        if isinstance(ed, dict) and "device" in ed
+    }
+    if requested_entry_id:
+        entry_data = available_entries.get(requested_entry_id)
+        if entry_data is None:
+            return None, {
+                "success": False,
+                "error": f"No THZ entry found for entry_id '{requested_entry_id}'",
+            }
+        return entry_data, None
+    if len(available_entries) > 1:
+        return None, {
+            "success": False,
+            "error": (
+                "Multiple THZ config entries found. "
+                "Provide 'entry_id' to target a specific device."
+            ),
+        }
+    if available_entries:
+        return next(iter(available_entries.values())), None
+    return None, {"success": False, "error": "THZ device not initialised"}
 
 
 async def _async_setup_services(hass: HomeAssistant) -> None:
@@ -640,6 +719,329 @@ async def _async_setup_services(hass: HomeAssistant) -> None:
         _LOGGER.info("Diverter valve command sent: position=%s confirmed_off=%s", position, confirmed)
         return {"success": True, "position": position, "confirmed_off": confirmed}
 
+    async def _async_handle_backup_parameters(call: ServiceCall) -> ServiceResponse:
+        """Handle the backup_parameters service call.
+
+        Reads the live value of every writable parameter — number, switch,
+        select, time and schedule registers — and writes a timestamped JSON
+        snapshot under config/thz_backups/. That folder lives inside the HA
+        config directory, so it rides along with Home Assistant's own
+        Backup feature automatically: no separate export/import step needed
+        to keep the snapshot safe. restore_parameters is what actually pushes
+        a saved snapshot's values back onto the physical heat pump — restoring
+        an HA backup only restores files, it can't rewrite device registers.
+        """
+        requested_entry_id: str | None = call.data.get("entry_id")
+        label: str | None = call.data.get("label")
+
+        entry_data, error = _resolve_entry_data(hass, requested_entry_id)
+        if error:
+            _LOGGER.error("backup_parameters: %s", error["error"])
+            return error
+
+        write_manager = entry_data["write_manager"]
+        device: THZDevice = entry_data["device"]
+        device_id = entry_data["device_id"]
+        entry_id_used = requested_entry_id or next(
+            (eid for eid, ed in hass.data.get(DOMAIN, {}).items() if ed is entry_data),
+            None,
+        )
+
+        write_registers = write_manager.get_all_registers()
+        parameters: dict[str, dict] = {}
+        read_errors: list[str] = []
+
+        for name, entry in write_registers.items():
+            reg_type = entry.get("type")
+            if reg_type not in _RESTORABLE_REGISTER_TYPES:
+                continue
+            try:
+                command = entry["command"]
+                if reg_type == "schedule":
+                    async with device.lock:
+                        value_bytes = await hass.async_add_executor_job(
+                            device.read_value, bytes.fromhex(command), "get", 4, 4
+                        )
+                    if not value_bytes or len(value_bytes) < 2:
+                        raise ValueError("no data received")
+                    start = quarters_to_time(value_bytes[0])
+                    end = quarters_to_time(value_bytes[1])
+                    value: Any = {
+                        "start": start.strftime("%H:%M") if start else None,
+                        "end": end.strftime("%H:%M") if end else None,
+                    }
+                else:
+                    async with device.lock:
+                        value_bytes = await hass.async_add_executor_job(
+                            device.read_value,
+                            bytes.fromhex(command),
+                            "get",
+                            WRITE_REGISTER_OFFSET,
+                            WRITE_REGISTER_LENGTH,
+                        )
+                    if not value_bytes:
+                        raise ValueError("no data received")
+
+                    if reg_type == "number":
+                        step_raw = entry.get("step", 1)
+                        step = float(step_raw) if step_raw != "" else 1.0
+                        value = THZValueCodec.decode_number(
+                            value_bytes, step, entry["decode_type"]
+                        )
+                    elif reg_type == "switch":
+                        value = THZValueCodec.decode_switch(value_bytes)
+                    elif reg_type == "select":
+                        value = THZValueCodec.decode_select(
+                            value_bytes, entry.get("decode_type")
+                        )
+                    else:  # "time"
+                        t = quarters_to_time(value_bytes[0])
+                        value = t.strftime("%H:%M") if t else None
+
+                parameters[name] = {"type": reg_type, "command": command, "value": value}
+            except Exception as err:  # noqa: BLE001
+                read_errors.append(f"{name}: {err}")
+                _LOGGER.warning("backup_parameters: failed to read %s: %s", name, err)
+
+        created = dt_util.utcnow().isoformat()
+        backup_doc = {
+            "created": created,
+            "device_id": device_id,
+            "entry_id": entry_id_used,
+            "firmware_version": getattr(device, "firmware_version", None),
+            "parameter_count": len(parameters),
+            "parameters": parameters,
+        }
+
+        timestamp = dt_util.utcnow().strftime("%Y%m%d-%H%M%S")
+        filename = f"thz_backup_{timestamp}{_sanitize_label(label)}.json"
+
+        def _write_backup_file() -> str:
+            backups_dir = _backups_dir(hass)
+            os.makedirs(backups_dir, exist_ok=True)
+            path = os.path.join(backups_dir, filename)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(backup_doc, f, indent=2, sort_keys=True)
+            return path
+
+        try:
+            path = await hass.async_add_executor_job(_write_backup_file)
+        except OSError as err:
+            error_msg = f"Failed to write backup file: {err}"
+            _LOGGER.error(error_msg)
+            return {"success": False, "error": error_msg}
+
+        _LOGGER.info(
+            "THZ backup_parameters: saved %d parameters to %s (%d read errors)",
+            len(parameters), path, len(read_errors),
+        )
+        return {
+            "success": True,
+            "file": filename,
+            "path": path,
+            "parameter_count": len(parameters),
+            "read_errors": read_errors[:20],
+            "created": created,
+        }
+
+    async def _async_handle_restore_parameters(call: ServiceCall) -> ServiceResponse:
+        """Handle the restore_parameters service call.
+
+        Reads a JSON snapshot previously written by backup_parameters and
+        pushes each value back onto the device. Every parameter's command
+        and type are re-resolved from the *current* live register map by
+        name — never trusted from the backup file itself — so a restore
+        stays correct even if the integration's register map has changed
+        since the backup was taken. Parameters no longer present are
+        skipped and reported rather than failing the whole restore.
+        """
+        requested_entry_id: str | None = call.data.get("entry_id")
+        requested_filename: str | None = call.data.get("filename")
+        dry_run: bool = bool(call.data.get("dry_run", False))
+        only: list[str] | None = call.data.get("only")
+        only_set = set(only) if only else None
+
+        entry_data, error = _resolve_entry_data(hass, requested_entry_id)
+        if error:
+            _LOGGER.error("restore_parameters: %s", error["error"])
+            return error
+
+        write_manager = entry_data["write_manager"]
+        device: THZDevice = entry_data["device"]
+
+        def _resolve_backup_path() -> str | None:
+            backups_dir = _backups_dir(hass)
+            if requested_filename:
+                candidate = os.path.join(
+                    backups_dir, os.path.basename(requested_filename)
+                )
+                return candidate if os.path.isfile(candidate) else None
+            if not os.path.isdir(backups_dir):
+                return None
+            files = [
+                f for f in os.listdir(backups_dir)
+                if f.startswith("thz_backup_") and f.endswith(".json")
+            ]
+            if not files:
+                return None
+            files.sort(reverse=True)  # timestamp-prefixed names sort chronologically
+            return os.path.join(backups_dir, files[0])
+
+        path = await hass.async_add_executor_job(_resolve_backup_path)
+        if not path:
+            error_msg = (
+                f"Backup file '{requested_filename}' not found"
+                if requested_filename
+                else "No backup files found in thz_backups/"
+            )
+            _LOGGER.error("restore_parameters: %s", error_msg)
+            return {"success": False, "error": error_msg}
+
+        def _read_backup() -> dict:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+
+        try:
+            backup_doc = await hass.async_add_executor_job(_read_backup)
+        except (OSError, ValueError) as err:
+            error_msg = f"Failed to read backup file '{path}': {err}"
+            _LOGGER.error(error_msg)
+            return {"success": False, "error": error_msg}
+
+        saved_parameters: dict[str, dict] = backup_doc.get("parameters", {})
+        write_registers = write_manager.get_all_registers()
+
+        restored = 0
+        skipped_missing: list[str] = []
+        failed: list[str] = []
+
+        for name, saved in saved_parameters.items():
+            if only_set is not None and name not in only_set:
+                continue
+            entry = write_registers.get(name)
+            if entry is None or entry.get("type") not in _RESTORABLE_REGISTER_TYPES:
+                skipped_missing.append(name)
+                continue
+
+            reg_type = entry["type"]
+            command = entry["command"]
+            value = saved.get("value")
+
+            try:
+                if reg_type == "number":
+                    step_raw = entry.get("step", 1)
+                    step = float(step_raw) if step_raw != "" else 1.0
+                    num_value = float(value)
+                    min_raw, max_raw = entry.get("min"), entry.get("max")
+                    if min_raw not in (None, ""):
+                        try:
+                            num_value = max(num_value, float(min_raw))
+                        except (TypeError, ValueError):
+                            pass
+                    if max_raw not in (None, ""):
+                        try:
+                            num_value = min(num_value, float(max_raw))
+                        except (TypeError, ValueError):
+                            pass
+                    value_bytes = THZValueCodec.encode_number(
+                        num_value, step, entry["decode_type"]
+                    )
+                elif reg_type == "switch":
+                    value_bytes = THZValueCodec.encode_switch(bool(value))
+                elif reg_type == "select":
+                    value_bytes = THZValueCodec.encode_select(
+                        value, entry.get("decode_type")
+                    )
+                elif reg_type == "time":
+                    t_value = _parse_hhmm(value)
+                    num = time_to_quarters(t_value)
+                    value_bytes = bytes([num, 0])
+                elif reg_type == "schedule":
+                    start_value = _parse_hhmm(value.get("start")) if value else None
+                    end_value = _parse_hhmm(value.get("end")) if value else None
+                    async with device.lock:
+                        current_bytes = await hass.async_add_executor_job(
+                            device.read_value, bytes.fromhex(command), "get", 4, 4
+                        )
+                    schedule_bytes = bytearray(current_bytes)
+                    schedule_bytes[0] = time_to_quarters(start_value)
+                    schedule_bytes[1] = time_to_quarters(end_value, is_end_time=True)
+                    value_bytes = bytes(schedule_bytes)
+                else:
+                    skipped_missing.append(name)
+                    continue
+            except (ValueError, TypeError, KeyError, IndexError) as err:
+                failed.append(f"{name}: {err}")
+                continue
+
+            if dry_run:
+                restored += 1
+                continue
+
+            try:
+                async with device.lock:
+                    await hass.async_add_executor_job(
+                        device.write_value, bytes.fromhex(command), value_bytes
+                    )
+                restored += 1
+            except (OSError, RuntimeError, ConnectionError) as err:
+                failed.append(f"{name}: {err}")
+
+        _LOGGER.info(
+            "THZ restore_parameters: %s%d restored, %d skipped (missing), "
+            "%d failed, from %s",
+            "[DRY RUN] " if dry_run else "",
+            restored, len(skipped_missing), len(failed), path,
+        )
+
+        return {
+            "success": True,
+            "dry_run": dry_run,
+            "file": os.path.basename(path),
+            "backup_created": backup_doc.get("created"),
+            "total_in_backup": len(saved_parameters),
+            "restored": restored,
+            "skipped_missing": skipped_missing[:20],
+            "skipped_missing_count": len(skipped_missing),
+            "failed": failed[:20],
+            "failed_count": len(failed),
+        }
+
+    async def _async_handle_list_parameter_backups(call: ServiceCall) -> ServiceResponse:
+        """Handle the list_parameter_backups service call.
+
+        Lists the parameter backup files under config/thz_backups/, newest
+        first, so a filename can be picked and passed to restore_parameters.
+        """
+
+        def _list() -> list[dict]:
+            backups_dir = _backups_dir(hass)
+            if not os.path.isdir(backups_dir):
+                return []
+            results = []
+            for fname in sorted(os.listdir(backups_dir), reverse=True):
+                if not (fname.startswith("thz_backup_") and fname.endswith(".json")):
+                    continue
+                fpath = os.path.join(backups_dir, fname)
+                info: dict[str, Any] = {
+                    "filename": fname,
+                    "size_bytes": os.path.getsize(fpath),
+                }
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        doc = json.load(f)
+                    info["created"] = doc.get("created")
+                    info["parameter_count"] = doc.get("parameter_count")
+                    info["device_id"] = doc.get("device_id")
+                    info["firmware_version"] = doc.get("firmware_version")
+                except (OSError, ValueError):
+                    pass
+                results.append(info)
+            return results
+
+        backups = await hass.async_add_executor_job(_list)
+        return {"success": True, "count": len(backups), "backups": backups}
+
     # Register services
     hass.services.async_register(
         DOMAIN,
@@ -669,6 +1071,35 @@ async def _async_setup_services(hass: HomeAssistant) -> None:
             vol.Required("position"): vol.In(["heating", "dhw", "off"]),
             vol.Optional("entry_id"): cv.string,
         }),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "backup_parameters",
+        _async_handle_backup_parameters,
+        schema=vol.Schema({
+            vol.Optional("entry_id"): cv.string,
+            vol.Optional("label"): cv.string,
+        }),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "restore_parameters",
+        _async_handle_restore_parameters,
+        schema=vol.Schema({
+            vol.Optional("entry_id"): cv.string,
+            vol.Optional("filename"): cv.string,
+            vol.Optional("dry_run", default=False): cv.boolean,
+            vol.Optional("only"): [cv.string],
+        }),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "list_parameter_backups",
+        _async_handle_list_parameter_backups,
+        schema=vol.Schema({}),
         supports_response=SupportsResponse.OPTIONAL,
     )
     _LOGGER.info("THZ services registered")
@@ -917,6 +1348,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.services.async_remove(DOMAIN, "read_raw_register")
             hass.services.async_remove(DOMAIN, "refresh_block")
             hass.services.async_remove(DOMAIN, "set_diverter_valve")
+            hass.services.async_remove(DOMAIN, "backup_parameters")
+            hass.services.async_remove(DOMAIN, "restore_parameters")
+            hass.services.async_remove(DOMAIN, "list_parameter_backups")
 
     return unload_ok
 
