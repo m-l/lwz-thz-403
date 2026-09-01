@@ -79,9 +79,9 @@ data:
 To provide a cleaner initial setup experience, some less-commonly-needed entity
 types start out disabled:
 
-- **Time plan/programme entities**: Advanced schedule configuration entities (`programDHW_*`, `programHC1_*`, `programHC2_*`)
+- **Time plan/programme entities**: Advanced schedule configuration entities (`programDHW_*`, `programHC1_*`)
 - **Advanced technical parameters**: Parameters like gradient, hysteresis, integral components (typically p13 and higher)
-- **HC2 (Heating Circuit 2) entities**: Only needed if you have a second heating circuit installed. Gated by a separate setting from the two above -- see below.
+- **HC2 (Heating Circuit 2) entities**: Only needed if you have a second heating circuit installed, including HC2's own schedule entities (`programHC2_*`). Gated by a separate setting from the two above -- see below.
 
 An **Entity Visibility** option (set during initial setup, or changed anytime
 via **Reconfigure**) controls how many schedule/advanced entities start out enabled:
