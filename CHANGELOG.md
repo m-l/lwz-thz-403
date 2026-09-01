@@ -6,6 +6,10 @@ All notable changes to the THZ integration are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.4.2] – 2026-09-01
+
 ### New Features
 
 - **Entity visibility tiers** (`entity_visibility` config option, set at setup or via
