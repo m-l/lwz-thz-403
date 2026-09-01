@@ -18,6 +18,13 @@ All notable changes to the THZ integration are documented here.
   touches entities you've manually toggled; only ones this option itself disabled get
   re-enabled.
 
+- **`enable_hc2` config option**: A separate checkbox for showing Heating Circuit 2
+  entities, independent of the `entity_visibility` tier above. Previously HC2 was
+  lumped into the same category as advanced technical parameters, so there was no way
+  to show one without the other — even the "All" tier enabled HC2 whether you wanted it
+  or not. HC2 now defaults to hidden regardless of tier, including under "All", until
+  this is explicitly checked. Same retroactive Reconfigure behavior as the tier option.
+
 - **FHEM/technical entity_id naming style** (`entity_id_style` config option, set at
   setup or via Reconfigure): an alternative to this integration's descriptive entity_id
   naming. Choosing "FHEM/technical" derives each `entity_id` from the raw

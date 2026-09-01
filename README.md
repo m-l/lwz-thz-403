@@ -79,27 +79,32 @@ data:
 To provide a cleaner initial setup experience, some less-commonly-needed entity
 types start out disabled:
 
-- **HC2 (Heating Circuit 2) entities**: Only needed if you have a second heating circuit installed
 - **Time plan/programme entities**: Advanced schedule configuration entities (`programDHW_*`, `programHC1_*`, `programHC2_*`)
 - **Advanced technical parameters**: Parameters like gradient, hysteresis, integral components (typically p13 and higher)
+- **HC2 (Heating Circuit 2) entities**: Only needed if you have a second heating circuit installed. Gated by a separate setting from the two above -- see below.
 
 An **Entity Visibility** option (set during initial setup, or changed anytime
-via **Reconfigure**) controls how many of these start out enabled:
+via **Reconfigure**) controls how many schedule/advanced entities start out enabled:
 
 | Tier | Behavior |
 |------|----------|
-| `Default` | Hides HC2, schedules, and advanced parameters (the entity list above) |
-| `Extended` | Enables HC2 and advanced parameters; schedules stay hidden |
-| `All` | Enables everything, including schedules |
+| `Default` | Hides schedules and advanced parameters (the entity list above) |
+| `Extended` | Enables advanced parameters; schedules stay hidden |
+| `All` | Enables everything except HC2 (see below), including schedules |
 
-Changing this option later via **Reconfigure** is retroactive: it bulk
+A separate **Enable HC2 Entities** checkbox (off by default, also set at setup
+or via Reconfigure) independently controls HC2 entities. It's deliberately not
+part of the tier above -- most installs only have one heating circuit, so even
+the `All` tier leaves HC2 hidden until this is checked.
+
+Changing either setting later via **Reconfigure** is retroactive: it bulk
 enables/disables the matching entities on your existing install, so you
 don't need to re-add the integration or click through entities one by one.
 It never touches an entity you've manually enabled or disabled yourself.
 
 Individual entities can always be re-enabled or hidden by hand via
 **Settings → Devices & Services → THZ → device → Show disabled entities**,
-regardless of the chosen tier.
+regardless of these settings.
 
 ### Entity ID Naming Style
 
