@@ -8,6 +8,22 @@ All notable changes to the THZ integration are documented here.
 
 ---
 
+## [0.4.3] – 2026-09-01
+
+### Bug Fixes
+
+- **`enable_hc2` not applied on upgrade**: entries that predate the hc2/advanced
+  category split (where HC2 was previously enabled under the "Extended"/"All" tiers)
+  had no recorded HC2 reconciliation state, so the change-detection defaulted the
+  "previous" HC2 state to `False` -- coincidentally matching the checkbox's own
+  default. Explicitly setting "Enable HC2 entities" to off via Reconfigure, with the
+  tier left unchanged, was then wrongly treated as a no-op, leaving already-enabled
+  HC2 entities visible. Now infers the effective prior HC2 state from the
+  previously-applied tier when no HC2 reconciliation has run yet, so this case is
+  correctly detected and reconciled.
+
+---
+
 ## [0.4.2] – 2026-09-01
 
 ### New Features
