@@ -89,8 +89,8 @@ via **Reconfigure**) controls how many schedule/advanced entities start out enab
 | Tier | Behavior |
 |------|----------|
 | `Default` | Hides schedules and advanced parameters (the entity list above) |
-| `Extended` | Enables advanced parameters; schedules stay hidden |
-| `All` | Enables everything except HC2 (see below), including schedules |
+| `Extended` | Enables everything except schedules |
+| `All` | Enables all parameters, including schedules -- except HC2 (see below) |
 
 A separate **Enable HC2 Entities** checkbox (off by default, also set at setup
 or via Reconfigure) independently controls HC2 entities. It's deliberately not
