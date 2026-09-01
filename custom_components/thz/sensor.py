@@ -43,6 +43,38 @@ from .value_codec import decode_raw_value
 
 _LOGGER = logging.getLogger(__name__)
 
+# Sanity bounds for decoded sensor values, keyed by device_class. A decoded
+# reading outside this range is almost certainly a corrupted response --
+# either a transmission glitch on the serial link that still happened to
+# pass the protocol's 1-byte checksum (a 1-in-256 chance per corrupted
+# frame), or a transient device-side hiccup -- rather than a real physical
+# reading; a Stiebel Eltron/Tecalor heat pump never actually sees -2000 C.
+#
+# Left unchecked, a single garbage reading like that gets published as the
+# entity's state and Home Assistant's recorder bakes it permanently into
+# that hour's long-term statistics, dragging the mean far from reality
+# forever (the min/mean/max never get corrected by later good readings).
+# Discarding just that one sample (returning None -> "unknown", which the
+# recorder excludes from statistics) is far cheaper than a corrupted
+# history: the next successful poll reports the real value again.
+_SANITY_RANGES: dict[str, tuple[float, float]] = {
+    "temperature": (-50.0, 100.0),
+}
+
+# Solar thermal collectors run far hotter than anything else this
+# integration measures. With the circulation pump stopped (stagnation --
+# full sun, no draw-off to carry heat away), a flat-plate collector
+# commonly reaches 150-200 C and an evacuated-tube collector higher still;
+# the blanket temperature range above would misclassify a real stagnation
+# reading as corrupted garbage. These translation_keys (both firmware
+# families' names for the same "collectorTemp" register) get a wide,
+# stagnation-safe ceiling instead. The solar loop's other two temperature
+# sensors -- DHW-side and flow-side -- stay on the standard range above:
+# they track tank/pipe water temperature, not the sun-facing collector
+# plate itself, so they're not expected to see stagnation-level heat.
+_SOLAR_COLLECTOR_TRANSLATION_KEYS = frozenset({"collector_temp", "solar_collector_temp"})
+_SOLAR_COLLECTOR_RANGE = (-50.0, 300.0)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -303,6 +335,7 @@ class THZGenericSensor(CoordinatorEntity, SensorEntity):
         self._factor = e["factor"]
         self._unit = e.get("unit")
         self._device_class = e.get("device_class")
+        self._translation_key = e.get("translation_key")
         self._state_class = e.get("state_class")
         self._icon = e.get("icon")
         self._device_id = device_id
@@ -366,7 +399,34 @@ class THZGenericSensor(CoordinatorEntity, SensorEntity):
                 )
                 return None
             raw_bytes = payload[self._offset : self._offset + self._length]
-            return decode_value(raw_bytes, self._decode_type, self._factor)
+            value = decode_value(raw_bytes, self._decode_type, self._factor)
+
+            if self._translation_key in _SOLAR_COLLECTOR_TRANSLATION_KEYS:
+                sane_range = _SOLAR_COLLECTOR_RANGE
+            else:
+                sane_range = _SANITY_RANGES.get(self._device_class)
+            if (
+                sane_range is not None
+                and isinstance(value, (int, float))
+                and not isinstance(value, bool)
+            ):
+                low, high = sane_range
+                if not (low <= value <= high):
+                    _LOGGER.warning(
+                        "Sensor %s read an implausible %s value: %s "
+                        "(outside the sane range %s-%s) from raw bytes %s; "
+                        "discarding this reading as a corrupted response "
+                        "rather than recording it.",
+                        self._entity_name,
+                        self._device_class,
+                        value,
+                        low,
+                        high,
+                        raw_bytes.hex(),
+                    )
+                    return None
+
+            return value
         except (ValueError, IndexError, TypeError) as err:
             _LOGGER.error(
                 "Error decoding sensor %s: %s", self._entity_name, err, exc_info=True

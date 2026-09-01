@@ -1,8 +1,10 @@
 """Tests for sensor module functions."""
 
+from unittest.mock import MagicMock
+
 import pytest
 
-from custom_components.thz.sensor import normalize_entry
+from custom_components.thz.sensor import THZGenericSensor, normalize_entry
 
 
 class TestNormalizeEntry:
@@ -238,6 +240,157 @@ class TestDuplicateSensorHandling:
         sensor_name2 = "flowTemp"
         
         seen_sensor_names.add(sensor_name1)
-        
+
         is_duplicate = sensor_name2 in seen_sensor_names
         assert not is_duplicate
+
+
+class TestNativeValueSanityRange:
+    """Regression coverage for the implausible-value guard in native_value().
+
+    The device occasionally returns a garbage reading that still passes the
+    protocol's checksum (e.g. a corrupted response with a coincidentally
+    matching 1-byte CRC), decoding to something like -2303.9 C. Published as
+    a sensor state, Home Assistant's recorder bakes that straight into long
+    term statistics -- permanently skewing that hour's min/mean/max. These
+    tests confirm implausible temperature readings are discarded (native_value
+    returns None) instead of being reported, while genuine in-range readings
+    and non-temperature sensors are unaffected.
+    """
+
+    @staticmethod
+    def _make_coordinator(data: bytes | None):
+        coord = MagicMock()
+        coord.data = data
+        coord.async_add_listener = MagicMock(return_value=lambda: None)
+        return coord
+
+    @staticmethod
+    def _make_temp_sensor(raw_hex: str, offset: int = 0, length: int = 2):
+        """Build a THZGenericSensor decoding a hex2int temperature at offset 0."""
+        entry = {
+            "name": "outsideTemp",
+            "offset": offset,
+            "length": length,
+            "decode": "hex2int",
+            "factor": 10,
+            "unit": "°C",
+            "device_class": "temperature",
+            "state_class": "measurement",
+        }
+        coordinator = TestNativeValueSanityRange._make_coordinator(
+            bytes.fromhex(raw_hex)
+        )
+        return THZGenericSensor(
+            coordinator,
+            entry=entry,
+            block=b"\x00\xfb",
+            device_id="test_device",
+        )
+
+    def test_implausible_negative_temperature_is_discarded(self):
+        """A wildly-out-of-range decoded value returns None, not the garbage number."""
+        # 0xA6C1 signed / 10 = -2303.9 -- matches the kind of value seen from
+        # a corrupted read; far outside any real heat pump temperature.
+        sensor = self._make_temp_sensor("a6c1")
+        assert sensor.native_value is None
+
+    def test_implausible_positive_temperature_is_discarded(self):
+        """The sanity range guards the high end too, not just negative garbage."""
+        # 0x7530 signed / 10 = 3000.0 C.
+        sensor = self._make_temp_sensor("7530")
+        assert sensor.native_value is None
+
+    def test_plausible_temperature_is_reported_normally(self):
+        """A realistic reading within range still comes through untouched."""
+        # 0x00D2 signed / 10 = 21.0 C.
+        sensor = self._make_temp_sensor("00d2")
+        assert sensor.native_value == 21.0
+
+    def test_boundary_values_are_not_discarded(self):
+        """Values exactly at the sane-range boundary are still accepted."""
+        # 0xFE0C signed = -500 / 10 = -50.0 C (lower boundary, inclusive).
+        sensor = self._make_temp_sensor("fe0c")
+        assert sensor.native_value == -50.0
+
+    @staticmethod
+    def _make_collector_sensor(raw_hex: str, translation_key: str = "solar_collector_temp"):
+        """Build a THZGenericSensor for the solar collector temperature register."""
+        entry = {
+            "name": "collectorTemp",
+            "offset": 0,
+            "length": 2,
+            "decode": "hex2int",
+            "factor": 10,
+            "unit": "°C",
+            "device_class": "temperature",
+            "state_class": "measurement",
+            "translation_key": translation_key,
+        }
+        coordinator = TestNativeValueSanityRange._make_coordinator(
+            bytes.fromhex(raw_hex)
+        )
+        return THZGenericSensor(
+            coordinator,
+            entry=entry,
+            block=b"\x00\x16",
+            device_id="test_device",
+        )
+
+    def test_solar_collector_stagnation_temperature_is_not_discarded(self):
+        """A real stagnation reading (pump stopped, full sun) must not be
+        mistaken for a corrupted read -- flat-plate collectors commonly hit
+        150-200 C in this state, well past the standard 100 C temperature
+        ceiling used for every other sensor.
+        """
+        # 0x0708 signed / 10 = 180.0 C.
+        sensor = self._make_collector_sensor("0708")
+        assert sensor.native_value == 180.0
+
+    def test_solar_collector_still_rejects_genuine_garbage(self):
+        """The collector's wider range isn't unlimited -- it still catches
+        the same kind of implausible value as any other temperature sensor.
+        """
+        # 0x7530 signed / 10 = 3000.0 C -- no collector gets that hot.
+        sensor = self._make_collector_sensor("7530")
+        assert sensor.native_value is None
+
+    def test_older_firmwares_collector_temp_translation_key_also_widened(self):
+        """Firmware 2.06/2.14 register maps use translation_key
+        'collector_temp' (not 'solar_collector_temp') for the same sensor --
+        both names must get the widened range.
+        """
+        sensor = self._make_collector_sensor("0708", translation_key="collector_temp")
+        assert sensor.native_value == 180.0
+
+    def test_solar_dhw_and_flow_temps_keep_the_standard_range(self):
+        """Only the collector plate itself is expected to reach stagnation
+        heat -- the solar loop's DHW-side and flow-side sensors track tank/
+        pipe water temperature and stay on the normal -50/100 C range.
+        """
+        sensor = self._make_collector_sensor("0708", translation_key="solar_dhw_temp")
+        assert sensor.native_value is None  # 180.0 C is implausible for this one
+
+    def test_non_temperature_sensor_is_not_range_checked(self):
+        """Sensors without a sanity range configured (e.g. energy) pass through
+        any decoded value unmodified, however large."""
+        entry = {
+            "name": "sHeatHCTotal",
+            "offset": 0,
+            "length": 4,
+            "decode": "hex2int",
+            "factor": 1,
+            "unit": "kWh",
+            "device_class": "energy",
+            "state_class": "total_increasing",
+        }
+        # A huge value that would fail the temperature sanity range, but this
+        # sensor isn't a temperature so it must not be discarded.
+        coordinator = self._make_coordinator((30000).to_bytes(4, "big", signed=True))
+        sensor = THZGenericSensor(
+            coordinator,
+            entry=entry,
+            block=b"\x0a\x09\x30",
+            device_id="test_device",
+        )
+        assert sensor.native_value == 30000
