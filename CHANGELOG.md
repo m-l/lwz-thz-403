@@ -8,6 +8,20 @@ All notable changes to the THZ integration are documented here.
 
 ---
 
+## [0.4.4] – 2026-09-01
+
+### Bug Fixes
+
+- **HC2 schedule entities ignored `enable_hc2`**: entity names matching both the
+  "program" (schedule) and "hc2" keywords -- i.e. HC2's own time-plan entities like
+  `programHC2_Mo_0` -- were classified purely as "schedule", so they were governed
+  only by the `entity_visibility` tier and became visible under "All" regardless of
+  the "Enable HC2 entities" checkbox. HC2 is now matched before "schedule", so any
+  HC2-related entity, program/schedule ones included, is gated purely by
+  `enable_hc2`, independent of the tier.
+
+---
+
 ## [0.4.3] – 2026-09-01
 
 ### Bug Fixes
@@ -21,14 +35,6 @@ All notable changes to the THZ integration are documented here.
   HC2 entities visible. Now infers the effective prior HC2 state from the
   previously-applied tier when no HC2 reconciliation has run yet, so this case is
   correctly detected and reconciled.
-
-- **HC2 schedule entities ignored `enable_hc2`**: entity names matching both the
-  "program" (schedule) and "hc2" keywords -- i.e. HC2's own time-plan entities like
-  `programHC2_Mo_0` -- were classified purely as "schedule", so they were governed
-  only by the `entity_visibility` tier and became visible under "All" regardless of
-  the "Enable HC2 entities" checkbox. HC2 is now matched before "schedule", so any
-  HC2-related entity, program/schedule ones included, is gated purely by
-  `enable_hc2`, independent of the tier.
 
 ---
 
