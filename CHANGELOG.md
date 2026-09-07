@@ -16,6 +16,17 @@ All notable changes to the THZ integration are documented here.
 
 ### Bug Fixes
 
+- **HC2 climate entity always skipped**: creating the HC2 climate entity
+  required a `hcOpMode` field from the `pxxF5` register block, but that
+  field has never been mapped there (unlike `pxxF4` for HC1) -- so the
+  entity was silently skipped every time, logging "Required fields missing
+  from pxxF5 map". `op_mode_offset`/`op_mode_length` are now optional on
+  `THZClimate`; when absent, `hvac_mode` reports a fixed `HEAT` instead of
+  decoding a field that doesn't exist. The HC2 climate entity is now
+  created normally (temperature control works), just without a live
+  per-circuit HVAC status until someone can confirm via a real register
+  capture whether one exists on the wire.
+
 - **`enable_hc2` not applied on upgrade**: entries that predate the hc2/advanced
   category split (where HC2 was previously enabled under the "Extended"/"All" tiers)
   had no recorded HC2 reconciliation state, so the change-detection defaulted the

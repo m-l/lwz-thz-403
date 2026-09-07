@@ -404,3 +404,76 @@ class TestTHZClimateEntity:
         )
         assert HVACMode.COOL not in entity.hvac_modes
         assert HVACMode.HEAT in entity.hvac_modes
+
+
+class TestTHZClimateOptionalOpMode:
+    """Tests for THZClimate when op_mode_offset/op_mode_length are None.
+
+    Covers the pxxF5 (HC2) case: that block has no hcOpMode field on any
+    known firmware map, so the entity is now created with op_mode_offset=
+    op_mode_length=None and hvac_mode falls back to a fixed HEAT instead of
+    trying to decode a field that doesn't exist.
+    """
+
+    @staticmethod
+    def _make_entity_without_opmode(coord_data: bytes | None = None):
+        from custom_components.thz.climate import THZClimate
+        coordinator = TestTHZClimateEntity._make_coordinator(coord_data)
+        device = TestTHZClimateEntity._make_device()
+        return THZClimate(
+            coordinator=coordinator,
+            cooling_coordinator=None,
+            device=device,
+            device_id="test_device",
+            translation_key="heating_circuit_2",
+            current_temp_offset=None,
+            current_temp_length=None,
+            target_temp_offset=10,
+            target_temp_length=2,
+            op_mode_offset=None,
+            op_mode_length=None,
+            heat_setpoint_entry={"command": "0B0005", "step": 0.1},
+            cool_switch_entry=None,
+            cool_setpoint_entry=None,
+        )
+
+    def test_hvac_mode_is_heat_when_op_mode_offset_is_none(self):
+        """hvac_mode falls back to HEAT when op_mode_offset is None."""
+        entity = self._make_entity_without_opmode(coord_data=bytes(60))
+        assert entity.hvac_mode == HVACMode.HEAT
+
+    def test_hvac_mode_is_heat_without_op_mode_regardless_of_data_content(self):
+        """hvac_mode is HEAT even if the buffer would otherwise decode to OFF."""
+        data = bytearray(60)
+        data[10] = 0xFF
+        data[11] = 0xFF
+        entity = self._make_entity_without_opmode(coord_data=bytes(data))
+        assert entity.hvac_mode == HVACMode.HEAT
+
+    def test_hvac_mode_is_heat_without_op_mode_and_without_data(self):
+        """hvac_mode is HEAT when there's neither op_mode nor coordinator data."""
+        entity = self._make_entity_without_opmode(coord_data=None)
+        assert entity.hvac_mode == HVACMode.HEAT
+
+    def test_hvac_modes_list_unaffected_by_missing_op_mode(self):
+        """hvac_modes still lists HEAT/OFF normally without an op_mode field."""
+        entity = self._make_entity_without_opmode(coord_data=bytes(60))
+        assert HVACMode.HEAT in entity.hvac_modes
+        assert HVACMode.OFF in entity.hvac_modes
+        assert HVACMode.COOL not in entity.hvac_modes
+
+    def test_current_temperature_unaffected_by_missing_op_mode(self):
+        """current_temperature is still None when no current-temp field exists."""
+        entity = self._make_entity_without_opmode(coord_data=bytes(60))
+        assert entity.current_temperature is None
+
+    def test_target_temperature_still_decoded_without_op_mode(self):
+        """target_temperature is decoded normally even without an op_mode field.
+
+        Byte offset 10, length 2, hex2int factor 10: 0x00D7 = 215 -> 21.5.
+        """
+        data = bytearray(60)
+        data[10] = 0x00
+        data[11] = 0xD7
+        entity = self._make_entity_without_opmode(coord_data=bytes(data))
+        assert entity.target_temperature == pytest.approx(21.5)

@@ -44,7 +44,7 @@ Three climate entities are automatically created when the required data blocks a
 | Entity | Source block | Supports |
 |--------|-------------|---------|
 | Heating Circuit 1 | `pxxF4` | Temperature setpoint, HVAC mode, preset (comfort/sleep/away), fan mode |
-| Heating Circuit 2 | `pxxF5` | Temperature setpoint, HVAC mode, preset — created only when HC2 is configured |
+| Heating Circuit 2 | `pxxF5` | Temperature setpoint, preset — created only when HC2 is configured. HVAC mode is fixed to `HEAT` (`pxxF5` has no per-circuit status field on any known firmware map yet) |
 | Domestic Hot Water | `pxxF3` | Temperature setpoint, HVAC mode |
 
 HC1 also exposes **HVAC action** (heating / cooling / idle) and optional **cooling mode** when the device supports active cooling.
