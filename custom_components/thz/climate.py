@@ -30,7 +30,13 @@ entities are created when the required data blocks are available:
   Like HC1, HC2 has independently-scheduled day/night setpoints
   (``p01RoomTempDayHC2`` / ``p02RoomTempNightHC2``); setting a new
   temperature writes to whichever register is currently active, using the
-  same logic as HC1.
+  same logic as HC1. Unlike HC1, ``pxxF5`` has no mapped ``hcOpMode`` field
+  (either this firmware genuinely has no per-circuit status for HC2, or it
+  simply hasn't been reverse-engineered yet -- see register_map_all.py) --
+  ``hvac_mode`` always reports ``HEAT`` for this entity rather than
+  guessing an offset. Temperature control is unaffected. If your HC2 does
+  have its own live status, please open an issue with a register capture so
+  this can be mapped properly.
 
 - **Domestic Hot Water (DHW)**: reads current / target water temperature from
   the ``pxxF3`` coordinator and supports ``HEAT`` mode only.  Like HC1, DHW
@@ -317,9 +323,20 @@ async def async_setup_entry(
     # ── Heating Circuit 2 ──────────────────────────────────────────────────
     hc2_coordinator = coordinators.get("pxxF5")
     if hc2_coordinator is not None:
-        if None in (f5_target, f5_opmode):
+        if f5_target is None:
             _LOGGER.error("Required fields missing from pxxF5 map; skipping HC2 climate entity")
         else:
+            if f5_opmode is None:
+                # pxxF5 has never had a mapped hcOpMode field (unlike pxxF4 for
+                # HC1) -- either this firmware genuinely doesn't expose one for
+                # HC2, or it just hasn't been reverse-engineered yet. Either
+                # way, the entity is still worth creating for temperature
+                # control; hvac_mode falls back to a fixed HEAT (see
+                # THZClimate.hvac_mode) rather than guessing an offset.
+                _LOGGER.info(
+                    "pxxF5 map has no hcOpMode field; HC2 climate entity will "
+                    "report a fixed HEAT mode instead of live per-circuit status"
+                )
             hc2_heat_entry = _find_entry(write_registers, _HC2_HEAT_SETPOINT_NAMES)
             hc2_night_entry = _find_entry(write_registers, _HC2_NIGHT_SETPOINT_NAMES)
             if hc2_heat_entry is not None:
@@ -345,8 +362,8 @@ async def async_setup_entry(
                         current_temp_length=None,
                         target_temp_offset=f5_target[0],
                         target_temp_length=f5_target[1],
-                        op_mode_offset=f5_opmode[0],
-                        op_mode_length=f5_opmode[1],
+                        op_mode_offset=f5_opmode[0] if f5_opmode else None,
+                        op_mode_length=f5_opmode[1] if f5_opmode else None,
                         cooling_byte=a176_cooling[0] if a176_cooling else None,
                         cooling_bit=a176_cooling[1] if a176_cooling else None,
                         compressor_bit=a176_compressor[1] if a176_compressor else None,
@@ -517,8 +534,8 @@ class THZClimate(CoordinatorEntity, ClimateEntity):
         current_temp_length: int | None,
         target_temp_offset: int,
         target_temp_length: int,
-        op_mode_offset: int,
-        op_mode_length: int,
+        op_mode_offset: int | None,
+        op_mode_length: int | None,
         heat_setpoint_entry: dict | None,
         cool_switch_entry: dict | None,
         cool_setpoint_entry: dict | None,
@@ -545,8 +562,12 @@ class THZClimate(CoordinatorEntity, ClimateEntity):
             current_temp_length: Byte length of current temperature field.
             target_temp_offset: Byte offset of target temperature in block.
             target_temp_length: Byte length of target temperature field.
-            op_mode_offset: Byte offset of operating-mode field in block.
-            op_mode_length: Byte length of operating-mode field.
+            op_mode_offset: Byte offset of operating-mode field in block, or
+                ``None`` when the block doesn't expose one (currently only
+                HC2 / ``pxxF5``) -- ``hvac_mode`` then always reports
+                ``HEAT`` instead of decoding a field that doesn't exist.
+            op_mode_length: Byte length of operating-mode field. Ignored
+                when ``op_mode_offset`` is ``None``.
             heat_setpoint_entry: Write-register metadata for heat setpoint.
             cool_switch_entry: Write-register metadata for cooling switch.
             cool_setpoint_entry: Write-register metadata for cooling setpoint.
@@ -777,8 +798,11 @@ class THZClimate(CoordinatorEntity, ClimateEntity):
             ):
                 return HVACMode.COOL
 
-        # Fall back to hcOpMode / dhwOpMode
-        if self.coordinator.data is None:
+        # Fall back to hcOpMode / dhwOpMode. Some blocks (currently pxxF5 /
+        # HC2) don't expose a per-circuit status field at all -- op_mode_offset
+        # is None in that case, and there's nothing to decode, so this always
+        # reports HEAT rather than guessing at a field that doesn't exist.
+        if self._op_mode_offset is None or self.coordinator.data is None:
             return HVACMode.HEAT
         return _read_op_mode(
             self.coordinator.data,

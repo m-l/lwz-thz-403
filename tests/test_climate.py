@@ -404,3 +404,83 @@ class TestTHZClimateEntity:
         )
         assert HVACMode.COOL not in entity.hvac_modes
         assert HVACMode.HEAT in entity.hvac_modes
+
+
+class TestTHZClimateOptionalOpMode:
+    """HC2 entities may have no per-circuit status field to decode: pxxF5
+    (unlike pxxF4 for HC1) has no mapped hcOpMode field on this firmware.
+    hvac_mode should gracefully report a fixed HEAT instead of raising or
+    guessing at an offset, and everything else (target temperature) should
+    keep working normally. Uses literal offsets rather than the module's
+    _F4_*/_F3_* constants -- see TestTHZClimateEntity's own helpers, which
+    are currently broken (ImportError) because those constants no longer
+    exist in climate.py; unrelated to this fix, not addressed here.
+    """
+
+    @staticmethod
+    def _make_entity_without_opmode(coord_data: bytes | None = None):
+        """Instantiate a THZClimate with op_mode_offset/length = None, as
+        HC2 entities do when pxxF5 has no hcOpMode field."""
+        from custom_components.thz.climate import THZClimate
+
+        coordinator = TestTHZClimateEntity._make_coordinator(coord_data)
+        device = TestTHZClimateEntity._make_device()
+        return THZClimate(
+            coordinator=coordinator,
+            cooling_coordinator=None,
+            device=device,
+            device_id="test_device",
+            translation_key="heating_circuit_2",
+            current_temp_offset=None,
+            current_temp_length=None,
+            target_temp_offset=10,
+            target_temp_length=2,
+            op_mode_offset=None,
+            op_mode_length=None,
+            heat_setpoint_entry={"command": "0B0005", "step": 0.1},
+            cool_switch_entry=None,
+            cool_setpoint_entry=None,
+        )
+
+    def test_hvac_mode_is_heat_when_op_mode_offset_is_none(self):
+        """hvac_mode reports HEAT when there's no op-mode field to decode,
+        even though coordinator data is present."""
+        entity = self._make_entity_without_opmode(coord_data=bytes(60))
+        assert entity.hvac_mode == HVACMode.HEAT
+
+    def test_hvac_mode_is_heat_without_op_mode_regardless_of_data_content(self):
+        """A None op_mode_offset short-circuits before any byte decoding --
+        short/unexpected data must not raise."""
+        entity = self._make_entity_without_opmode(coord_data=b"\x01")
+        assert entity.hvac_mode == HVACMode.HEAT
+
+    def test_hvac_mode_is_heat_without_op_mode_and_without_data(self):
+        """Also HEAT when the coordinator hasn't received data yet."""
+        entity = self._make_entity_without_opmode(coord_data=None)
+        assert entity.hvac_mode == HVACMode.HEAT
+
+    def test_hvac_modes_list_unaffected_by_missing_op_mode(self):
+        """hvac_modes is still just [HEAT] -- determined by cooling support,
+        not by whether op_mode_offset is set."""
+        entity = self._make_entity_without_opmode(coord_data=bytes(60))
+        assert entity.hvac_modes == [HVACMode.HEAT]
+
+    def test_current_temperature_unaffected_by_missing_op_mode(self):
+        """current_temperature is None because HC2 has no room-temperature
+        sensor (current_temp_offset=None) -- unrelated to op_mode, and no
+        exception is raised getting there."""
+        entity = self._make_entity_without_opmode(coord_data=bytes(60))
+        assert entity.current_temperature is None
+
+    def test_target_temperature_still_decoded_without_op_mode(self):
+        """target_temperature decodes normally: reading it calls hvac_mode
+        internally (to pick heat vs. cool setpoint), which must not blow up
+        with op_mode_offset=None.
+
+        Byte offset 10, length 2, hex2int factor 10: 0x00D7 = 215 -> 21.5.
+        """
+        data = bytearray(60)
+        data[10] = 0x00
+        data[11] = 0xD7
+        entity = self._make_entity_without_opmode(coord_data=bytes(data))
+        assert entity.target_temperature == pytest.approx(21.5)
