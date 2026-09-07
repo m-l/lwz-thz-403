@@ -6,6 +6,10 @@ All notable changes to the THZ integration are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.4.5] – 2026-09-07
+
 ### Bug Fixes
 
 - **HC2 climate entity always skipped**: creating the HC2 climate entity
