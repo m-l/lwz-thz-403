@@ -6,6 +6,20 @@ All notable changes to the THZ integration are documented here.
 
 ## [Unreleased]
 
+### Bug Fixes
+
+- **Unsupported write-register entities crashed at startup**: THZSelect,
+  THZSwitch, THZNumber, THZTime, and THZScheduleTime each read their
+  register directly in async_update() (unlike sensors/climate, which go
+  through a coordinator), and none of them caught
+  THZRegisterNotSupportedError -- so a register your device firmware
+  doesn't support raised straight out of the entity's very first update
+  when it was added to Home Assistant, logged once per startup as an
+  ERROR-level "Error on device update!" traceback. The read is now wrapped
+  in the same try/except used for coordinator-based block reads: an
+  unsupported register logs a single INFO line and leaves the entity at
+  its previous/default value instead of raising.
+
 ---
 
 ## [0.4.5] – 2026-09-07

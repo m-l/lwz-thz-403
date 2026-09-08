@@ -19,7 +19,7 @@ from .const import (
 )
 from .entity_translations import get_translation_key
 from .register_maps.register_map_manager import RegisterMapManagerWrite
-from .thz_device import THZDevice
+from .thz_device import THZDevice, THZRegisterNotSupportedError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -298,14 +298,23 @@ class THZTime(THZBaseEntity, TimeEntity):
 
     async def async_update(self):
         """Fetch new state data for the time."""
-        async with self._device.lock:
-            value_bytes = await self.hass.async_add_executor_job(
-                self._device.read_value,
-                bytes.fromhex(self._command),
-                "get",
-                WRITE_REGISTER_OFFSET,
-                WRITE_REGISTER_LENGTH,
+        try:
+            async with self._device.lock:
+                value_bytes = await self.hass.async_add_executor_job(
+                    self._device.read_value,
+                    bytes.fromhex(self._command),
+                    "get",
+                    WRITE_REGISTER_OFFSET,
+                    WRITE_REGISTER_LENGTH,
+                )
+        except THZRegisterNotSupportedError:
+            _LOGGER.info(
+                "Register %s (time %s) not supported by this device/firmware; "
+                "leaving unavailable.",
+                self._command,
+                self.name,
             )
+            return
 
         # Time values are stored as single bytes (0-95 quarters)
         if not value_bytes:
@@ -473,10 +482,19 @@ class THZScheduleTime(THZBaseEntity, TimeEntity):
 
     async def async_update(self):
         """Fetch new state data for the schedule time."""
-        async with self._device.lock:
-            value_bytes = await self.hass.async_add_executor_job(
-                self._device.read_value, bytes.fromhex(self._command), "get", 4, 4
+        try:
+            async with self._device.lock:
+                value_bytes = await self.hass.async_add_executor_job(
+                    self._device.read_value, bytes.fromhex(self._command), "get", 4, 4
+                )
+        except THZRegisterNotSupportedError:
+            _LOGGER.info(
+                "Register %s (schedule time %s) not supported by this device/"
+                "firmware; leaving unavailable.",
+                self._command,
+                self.name,
             )
+            return
 
         # Schedule data format (from FHEM 7prog):
         # - Bytes 0-3: header/other data
