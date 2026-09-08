@@ -6,6 +6,10 @@ All notable changes to the THZ integration are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.4.6] – 2026-09-08
+
 ### Bug Fixes
 
 - **Unsupported write-register entities crashed at startup**: THZSelect,
