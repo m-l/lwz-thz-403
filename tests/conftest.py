@@ -23,6 +23,19 @@ class MockEntity:
         """Return entity_registry_enabled_default via HA's _attr_ pattern."""
         return getattr(self, "_attr_entity_registry_enabled_default", True)
 
+    @property
+    def name(self):
+        """Return _attr_name via HA's _attr_ pattern.
+
+        Simplified: no translation-key resolution, just the same fallback
+        attribute real Entity.name reads when no translation is in play.
+        Needed by any entity method that logs or uses ``self.name``
+        directly, e.g. the write-register platforms' async_update() error
+        handling (select/switch/number/time), or
+        THZTime/THZScheduleTime.async_set_value().
+        """
+        return getattr(self, "_attr_name", None)
+
 class MockCoordinatorEntity(MockEntity):
     """Mock coordinator entity."""
 

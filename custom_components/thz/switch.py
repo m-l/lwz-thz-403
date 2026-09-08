@@ -16,7 +16,7 @@ from .const import (
     WRITE_REGISTER_LENGTH,
 )
 from .platform_setup import async_setup_write_platform
-from .thz_device import THZDevice
+from .thz_device import THZDevice, THZRegisterNotSupportedError
 from .value_codec import THZValueCodec
 
 _LOGGER = logging.getLogger(__name__)
@@ -91,14 +91,23 @@ class THZSwitch(THZBaseEntity, SwitchEntity):
             "Updating switch %s with command %s", self.name, self._command
         )
 
-        async with self._device.lock:
-            value_bytes = await self.hass.async_add_executor_job(
-                self._device.read_value,
-                bytes.fromhex(self._command),
-                "get",
-                WRITE_REGISTER_OFFSET,
-                WRITE_REGISTER_LENGTH,
+        try:
+            async with self._device.lock:
+                value_bytes = await self.hass.async_add_executor_job(
+                    self._device.read_value,
+                    bytes.fromhex(self._command),
+                    "get",
+                    WRITE_REGISTER_OFFSET,
+                    WRITE_REGISTER_LENGTH,
+                )
+        except THZRegisterNotSupportedError:
+            _LOGGER.info(
+                "Register %s (switch %s) not supported by this device/firmware; "
+                "leaving unavailable.",
+                self._command,
+                self.name,
             )
+            return
 
         # Validate that we received data
         if not value_bytes:

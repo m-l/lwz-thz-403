@@ -15,7 +15,7 @@ from .const import (
     WRITE_REGISTER_LENGTH,
 )
 from .platform_setup import async_setup_write_platform
-from .thz_device import THZDevice
+from .thz_device import THZDevice, THZRegisterNotSupportedError
 from .value_codec import THZValueCodec
 from .value_maps import SELECT_MAP
 
@@ -102,14 +102,23 @@ class THZSelect(THZBaseEntity, SelectEntity):
 
     async def async_update(self) -> None:
         """Fetch new state data for the select."""
-        async with self._device.lock:
-            value_bytes = await self.hass.async_add_executor_job(
-                self._device.read_value,
-                bytes.fromhex(self._command),
-                "get",
-                WRITE_REGISTER_OFFSET,
-                WRITE_REGISTER_LENGTH,
+        try:
+            async with self._device.lock:
+                value_bytes = await self.hass.async_add_executor_job(
+                    self._device.read_value,
+                    bytes.fromhex(self._command),
+                    "get",
+                    WRITE_REGISTER_OFFSET,
+                    WRITE_REGISTER_LENGTH,
+                )
+        except THZRegisterNotSupportedError:
+            _LOGGER.info(
+                "Register %s (select %s) not supported by this device/firmware; "
+                "leaving unavailable.",
+                self._command,
+                self.name,
             )
+            return
 
         # Validate that we received data
         if not value_bytes:
