@@ -317,6 +317,42 @@ WRITE_MAP = {
         "icon": "mdi:thermometer",
         "decode_type": "5temp",
     },
+    # pSolarHysteresis: hysteresis band for the solar collector loading
+    # differential (labeled "HISTEREZA SOLAR" on the LWZ 403 SOL control
+    # panel's service menu). FHEM's 00_THZ.pm only ever documented this
+    # value as a byte offset inside the firmware-206-only "08pxx206" bulk
+    # diagnostic block (which times out on 4.3x/5.3x firmware) -- it was
+    # never known to be individually addressable. Found by brute-force
+    # scanning the unmapped 0A05xx gap with the read_raw_register debug
+    # service: command 0A058F returned a clean value of 18 (x0.1 = 1.8),
+    # matching the live panel reading exactly.
+    "pSolarHysteresis": {
+        "command": "0A058F",
+        "min": "0",
+        "max": "10",
+        "unit": " K",
+        "step": 0.1,
+        "type": "number",
+        "device_class": "measurement",
+        "icon": "mdi:swap-horizontal",
+        "decode_type": "5temp",
+    },
+    # pDHWVaporizationDelay: delay before the DHW solar loop responds after
+    # a collector stagnation/vaporization event (labeled "OPÓŹN.PAROWN.CW" on
+    # the control panel). Found the same way, immediately adjacent to
+    # pSolarHysteresis: command 0A058E returned a clean value of 60
+    # (minutes), matching the live panel reading exactly.
+    "pDHWVaporizationDelay": {
+        "command": "0A058E",
+        "min": "0",
+        "max": "120",
+        "unit": " min",
+        "step": 1,
+        "type": "number",
+        "device_class": "measurement",
+        "icon": "mdi:clock-outline",
+        "decode_type": "1clean",
+    },
     "p06DHWsetStandbyTemp": {
         "command": "0A0581",
         "min": "10",

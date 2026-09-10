@@ -248,6 +248,7 @@ def _classify_hidden_category(entity_name: str) -> str | None:
         "booster",
         "pasteurisation",
         "asymmetry",
+        "vaporization",
     ]
 
     for keyword in advanced_keywords:

@@ -6,6 +6,10 @@ All notable changes to the THZ integration are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.4.7] – 2026-09-10
+
 ### Added
 
 - **`p20FlowProportionHC2` number entity**: HC2's counterpart to the
@@ -15,6 +19,17 @@ All notable changes to the THZ integration are documented here.
   otherwise mirror each other byte-for-byte) and confirmed live via the
   `read_raw_register` debug service: command `0C059D` returns a clean,
   in-range value. Gated by `enable_hc2` like every other HC2 entity.
+
+- **`pSolarHysteresis` and `pDHWVaporizationDelay` number entities**: two
+  more solar-loop parameters that were never individually addressable in
+  FHEM's own reference (`00_THZ.pm` only ever exposed them as byte offsets
+  inside the firmware-206-only `08pxx206` bulk diagnostic block, which
+  times out on 4.3x/5.3x firmware). Found by brute-force scanning the
+  unmapped `0A05xx` address range with the `read_raw_register` debug
+  service and cross-checking the results against values read directly off
+  the control panel's service menu (Polish: `HISTEREZA SOLAR` = 1.8 K,
+  `OPÓŹN.PAROWN.CW` = 60 min). Commands `0A058F` and `0A058E`
+  respectively, both confirmed live and in range.
 
 ---
 
