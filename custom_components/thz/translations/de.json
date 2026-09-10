@@ -610,6 +610,12 @@
       "dhw_temp_solar_mode": {
         "name": "Warmwassertemperatur Solarbetrieb"
       },
+      "solar_hysteresis": {
+        "name": "Solar-Hysterese"
+      },
+      "dhw_vaporization_delay": {
+        "name": "Warmwasser-Verdampfungsverzögerung"
+      },
       "dhw_temp_standby": {
         "name": "Warmwassertemperatur Standby"
       },
@@ -1400,6 +1406,12 @@
       },
       "dhw_temp_solar_mode": {
         "name": "Warmwassertemperatur Solarmodus"
+      },
+      "solar_hysteresis": {
+        "name": "Solar-Hysterese"
+      },
+      "dhw_vaporization_delay": {
+        "name": "Warmwasser-Verdampfungsverzögerung"
       },
       "enable_dhw_buffer": {
         "name": "Warmwasserspeicher aktivieren"

@@ -115,6 +115,8 @@ ENTITY_TRANSLATION_KEYS = {
     "p82DelayCompStartSolar": "delay_comp_start_solar",
     "p83DHWsetSolarTemp": "dhw_temp_solar_mode",  # Solar DHW temperature
     "p84DHWTempSolarMode": "dhw_temp_solar_mode",
+    "pSolarHysteresis": "solar_hysteresis",
+    "pDHWVaporizationDelay": "dhw_vaporization_delay",
     "p84EnableDHWBuffer": "enable_dhw_buffer",
     # Defrost and filter
     "p85DefrStartThreshold": "defrost_start_threshold",

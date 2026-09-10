@@ -616,6 +616,12 @@
       "dhw_temp_solar_mode": {
         "name": "DHW Temp Solar Mode"
       },
+      "solar_hysteresis": {
+        "name": "Solar Hysteresis"
+      },
+      "dhw_vaporization_delay": {
+        "name": "DHW Vaporization Delay"
+      },
       "dhw_temp_standby": {
         "name": "DHW Temperature Standby"
       },
@@ -1406,6 +1412,12 @@
       },
       "dhw_temp_solar_mode": {
         "name": "DHW Temperature Solar Mode"
+      },
+      "solar_hysteresis": {
+        "name": "Solar Hysteresis"
+      },
+      "dhw_vaporization_delay": {
+        "name": "DHW Vaporization Delay"
       },
       "enable_dhw_buffer": {
         "name": "Enable DHW Buffer"
