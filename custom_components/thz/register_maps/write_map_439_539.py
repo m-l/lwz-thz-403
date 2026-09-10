@@ -162,6 +162,29 @@ WRITE_MAP = {
         "icon": "mdi:cog",
         "decode_type": "1clean",
     },
+    # p20FlowProportionHC2: HC2's counterpart to p19FlowProportionHC1 above.
+    # Missing from every firmware map even though the name/translation_key
+    # were already scaffolded (entity_translations.py, strings.json) -- the
+    # HC2 register block is otherwise a byte-for-byte mirror of HC1's (see
+    # p16GradientHC2/p18RoomInfluenceHC2 matching p13GradientHC1/
+    # p15RoomInfluenceHC1 at the same offsets one block down), and
+    # p17LowEndHC2 sits at 0C059E, exactly where p14LowEndHC1 sits at
+    # 0B059E relative to p19FlowProportionHC1's 0B059D -- so 0C059D was a
+    # confident guess. Confirmed via the read_raw_register debug service on
+    # real hardware (firmware 4.38, LWZ 403 SOL): command 0C059D returned a
+    # clean, in-range value (30, i.e. 30%) using the same decode_type as
+    # p19 -- not a timeout, not a "not supported" response.
+    "p20FlowProportionHC2": {
+        "command": "0C059D",
+        "min": "0",
+        "max": "100",
+        "unit": "%",
+        "step": 1,
+        "type": "number",
+        "device_class": "measurement",
+        "icon": "mdi:cog",
+        "decode_type": "1clean",
+    },
     "p01RoomTempDayHC2": {
         "command": "0C0005",
         "min": "12",
